@@ -28,7 +28,7 @@ class Aircraft(Entity):
     # Instance-specific stats (NO defaults - must be specified)
     # Using kw_only to allow required fields after fields with defaults
     missiles: int = field(kw_only=True)
-    radar_range: float = field(kw_only=True)
+    radar_range: float = field(kw_only=True) # it actually has default on base class, but we want to force user to specify it
     missile_max_range: float = field(kw_only=True)
     base_hit_prob: float = field(kw_only=True)
     min_hit_prob: float = field(kw_only=True)
@@ -94,7 +94,7 @@ class Aircraft(Entity):
             "min_hit_prob": self.min_hit_prob,
         })
         return data
-    
+
     @classmethod
     def _from_dict_impl(cls, data: Dict[str, Any]) -> Aircraft:
         """Construct aircraft from dictionary."""

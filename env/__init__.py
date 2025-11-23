@@ -41,6 +41,11 @@ from .core import (
     GameResult,
 )
 
+from .rendering import (
+    RenderStateBuilder,
+    WebRenderer,
+)
+
 __all__ = [
     # Main interface
     "GridCombatEnv",
@@ -57,4 +62,8 @@ __all__ = [
     "MoveDir",
     "EntityKind",
     "GameResult",
+
+    # Rendering
+    "RenderStateBuilder",
+    "WebRenderer",
 ]

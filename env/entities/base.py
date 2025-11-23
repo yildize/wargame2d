@@ -37,8 +37,8 @@ class Entity(ABC):
     # Capability flags (have defaults, set by subclasses)
     can_move: bool = True
     can_shoot: bool = False
-    
-    # NOTE: radar_range removed from base - defined in subclasses as required
+    radar_range: float = 0.0
+
 
     def __post_init__(self):
         """Validate entity after initialization."""
@@ -138,7 +138,7 @@ class Entity(ABC):
                 f"{self.label()} has no weapon implementation"
             )
         
-        if self.missiles <= 0:
+        if not hasattr(self, 'missiles') or self.missiles <= 0: # type: ignore[attr-defined]
             return ActionValidation.fail(
                 "NO_MISSILES",
                 f"{self.label()} has no missiles"
@@ -234,7 +234,6 @@ class Entity(ABC):
         Returns:
             Reconstructed entity (correct subclass)
         """
-        from ..core.actions import Action
 
         # Get the correct entity class
         entity_cls = cls._get_entity_class(data["type"])

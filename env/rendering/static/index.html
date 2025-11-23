@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Grid Combat Viewer</title>
+  <style>
+    :root {
+      --bg: #0e1117;
+      --panel: #171b24;
+      --card: #1d2330;
+      --border: #2a3242;
+      --accent: #7aa2ff;
+      --accent-2: #ff9f7a;
+      --text: #e8ecf3;
+      --muted: #9ca3b5;
+      --green: #8fe38f;
+      --red: #ff6b6b;
+      --blue: #5aa5ff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: radial-gradient(circle at 20% 20%, rgba(122,162,255,0.08), transparent 45%),
+                  radial-gradient(circle at 80% 0%, rgba(255,159,122,0.08), transparent 40%),
+                  linear-gradient(180deg, #0d1016, #0b0d12 40%, #0a0b10);
+      color: var(--text);
+      font: 14px/1.4 "Segoe UI", system-ui, -apple-system, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(15,18,26,0.8);
+      backdrop-filter: blur(6px);
+    }
+    #app {
+      display: grid;
+      grid-template-columns: minmax(620px, 2fr) minmax(320px, 1fr);
+      gap: 14px;
+      padding: 14px;
+      flex: 1;
+      min-height: 0;
+    }
+    .surface {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 12px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+    }
+    #canvas-wrapper {
+      position: relative;
+      min-height: 480px;
+      display: flex;
+      align-items: stretch;
+    }
+    #main-canvas {
+      width: 100%;
+      height: 100%;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: linear-gradient(180deg, #0f1421, #0e121a 45%, #0c1018);
+      display: block;
+    }
+    .panel {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+    .toolbar .spacer { flex: 1; }
+    .btn {
+      appearance: none;
+      background: #1f2636;
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 8px 10px;
+      border-radius: 10px;
+      cursor: pointer;
+      font-weight: 600;
+      transition: border-color 0.15s, transform 0.07s, background 0.2s;
+    }
+    .btn:hover { border-color: var(--accent); }
+    .btn:active { transform: translateY(1px); }
+    .btn.primary { background: linear-gradient(180deg,#2c3753,#212a42); border-color: #3a4666; }
+    .btn-group { display: inline-flex; border-radius: 10px; overflow: hidden; border: 1px solid var(--border); }
+    .btn-group button { border: none; border-right: 1px solid var(--border); background: #1c212f; }
+    .btn-group button:last-child { border-right: none; }
+    .btn.active { border-color: var(--accent); color: var(--accent); }
+    label.switch { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+    input[type="range"], select { accent-color: var(--accent); }
+    select {
+      background: #1c2230;
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 6px 8px;
+      border-radius: 8px;
+    }
+    .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .card-title { color: var(--muted); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; }
+    .status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
+    .status-tile {
+      background: #141925;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px;
+    }
+    .status-tile strong { display: block; color: var(--muted); font-size: 12px; margin-bottom: 4px; }
+    .pill { padding: 4px 10px; border-radius: 999px; background: #111621; border: 1px solid var(--border); color: var(--muted); display: inline-flex; align-items: center; gap: 6px; }
+    #entity-info { background: #141925; border: 1px solid var(--border); border-radius: 10px; padding: 10px; min-height: 90px; }
+    #entity-info div { margin: 2px 0; }
+  </style>
+</head>
+<body>
+  <header>
+    <strong>Grid Combat Viewer</strong>
+    <span id="connection-status" class="pill">● Connecting…</span>
+    <span class="pill" id="turn-label">Turn 0</span>
+  </header>
+
+  <div id="app">
+    <div class="surface" id="canvas-wrapper">
+      <canvas id="main-canvas"></canvas>
+    </div>
+
+    <div class="panel">
+      <div class="surface">
+        <div class="toolbar">
+          <div class="btn-group">
+            <button id="play-btn" class="btn primary">▶ Play</button>
+            <button id="pause-btn" class="btn">⏸ Pause</button>
+            <button id="step-btn" class="btn">⏭ Step</button>
+          </div>
+          <label class="switch">Speed
+            <select id="speed-select">
+              <option value="1">1x</option>
+              <option value="1.5" selected>1.5x</option>
+              <option value="2.5">2.5x</option>
+              <option value="4">4x</option>
+            </select>
+          </label>
+          <div class="spacer"></div>
+          <label class="switch">View
+            <select id="view-select">
+              <option value="god">Admin</option>
+              <option value="blue">Blue</option>
+              <option value="red">Red</option>
+            </select>
+          </label>
+        </div>
+        <div class="row" style="margin-top:8px;">
+          <input id="timeline-scrubber" type="range" min="0" max="0" value="0" style="flex:1;">
+          <div class="pill" id="timeline-label">0 / 0</div>
+        </div>
+        <div class="row" style="margin-top:6px;">
+          <label class="switch"><input id="toggle-actions" type="checkbox" checked> overlay actions</label>
+          <label class="switch"><input id="toggle-radar" type="checkbox"> radar</label>
+          <label class="switch"><input id="toggle-ids" type="checkbox"> ids</label>
+        </div>
+      </div>
+
+      <div class="surface">
+        <div class="status-grid">
+          <div class="status-tile">
+            <strong>Status</strong>
+            <div id="game-status">Waiting</div>
+            <div id="winner"></div>
+          </div>
+          <div class="status-tile">
+            <strong>Tracking</strong>
+            <div id="tracking">—</div>
+          </div>
+          <div class="status-tile">
+            <strong>Teams</strong>
+            <div id="team-counts">—</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="surface">
+        <div class="card-title">Entity Details</div>
+        <div id="entity-info">Click a unit on the grid…</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
+  <script>
+    const TEAM_COLORS = { BLUE: '#5aa5ff', RED: '#ff6b6b' };
+
+    // ================= Glyphs =================
+    function aircraftGlyph(ctx, cx, cy, size, color) {
+      ctx.save();
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - size * 0.55);
+      ctx.lineTo(cx - size * 0.22, cy + size * 0.30);
+      ctx.lineTo(cx + size * 0.22, cy + size * 0.30);
+      ctx.closePath();
+      ctx.fill();
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(cx - size * 0.55, cy);
+      ctx.lineTo(cx + size * 0.55, cy);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function awacsGlyph(ctx, cx, cy, size, color) {
+      ctx.save();
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - size * 0.4);
+      ctx.lineTo(cx - size * 0.2, cy + size * 0.30);
+      ctx.lineTo(cx + size * 0.2, cy + size * 0.30);
+      ctx.closePath();
+      ctx.fill();
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(cx - size * 0.55, cy);
+      ctx.lineTo(cx + size * 0.55, cy);
+      ctx.stroke();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.ellipse(cx, cy - size * 0.45, size * 0.33, size * 0.12, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function samGlyph(ctx, cx, cy, size, color, isOn, cooldownInfo) {
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(cx - size * 0.35, cy + size * 0.35);
+      ctx.lineTo(cx + size * 0.35, cy + size * 0.35);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(cx, cy + size * 0.35);
+      ctx.lineTo(cx, cy);
+      ctx.stroke();
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = isOn ? color : '#8b93a5';
+      ctx.beginPath();
+      ctx.moveTo(cx - size * 0.25, cy + size * 0.15);
+      ctx.lineTo(cx - size * 0.25, cy - size * 0.3);
+      ctx.moveTo(cx + size * 0.25, cy + size * 0.15);
+      ctx.lineTo(cx + size * 0.25, cy - size * 0.3);
+      ctx.stroke();
+      if (cooldownInfo && cooldownInfo.total > 0 && cooldownInfo.remaining > 0) {
+        const r = size * 0.55;
+        ctx.strokeStyle = '#ffb36a';
+        ctx.lineWidth = 3;
+        const prog = 1.0 - (cooldownInfo.remaining / cooldownInfo.total);
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + prog * 2 * Math.PI);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    function decoyGlyph(ctx, cx, cy, size, color) {
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(cx, cy, size * 0.35, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(cx - size * 0.25, cy - size * 0.25);
+      ctx.lineTo(cx + size * 0.25, cy + size * 0.25);
+      ctx.moveTo(cx + size * 0.25, cy - size * 0.25);
+      ctx.lineTo(cx - size * 0.25, cy + size * 0.25);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function selectionRing(ctx, cx, cy, radius, color) {
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // ================= Renderer =================
+    class GameRenderer {
+      constructor(canvas) {
+        this.canvas = canvas;
+        this.ctx = canvas.getContext('2d');
+        this.gridSize = 40;
+        this.originX = 0;
+        this.originY = 0;
+        this.viewMode = 'god';
+        this.gridWidth = 0;
+        this.gridHeight = 0;
+        this.showActions = true;
+        this.showRadar = false;
+        this.showIds = false;
+        this.visibleIds = new Set();
+        this.selectedId = null;
+        this.hasObservations = false;
+      }
+
+      drawState(state) {
+        if (!state) return;
+        this.gridWidth = state.grid.width;
+        this.gridHeight = state.grid.height;
+        this._layout();
+        this._clear();
+        this._drawGrid();
+
+        const obs = state.observations?.[this.viewMode];
+        this.visibleIds = new Set();
+        this.hasObservations = !!obs;
+        if (this.viewMode !== 'god' && obs) {
+          (obs.entities || []).forEach(o => this.visibleIds.add(o.entity_id));
+          (obs.friendly_ids || []).forEach(id => this.visibleIds.add(id));
+        }
+        if (this.viewMode !== 'god' && obs) {
+          this._drawFog(obs);
+        }
+
+        if (this.showRadar) {
+          this._drawRadar(state.entities);
+        }
+
+        this._drawEntities(state.entities);
+
+        if (this.showActions && state.actions) {
+          this._drawActions(state);
+        }
+      }
+
+      _layout() {
+        const rect = this.canvas.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        // Clamp grid size so the world doesn't "grow" too large on big screens
+        const desired = Math.min(rect.width / this.gridWidth, rect.height / this.gridHeight);
+        this.gridSize = Math.max(22, Math.min(54, Math.floor(desired)));
+        const worldWidthPx = this.gridWidth * this.gridSize;
+        const worldHeightPx = this.gridHeight * this.gridSize;
+        this.originX = Math.max(10, (rect.width - worldWidthPx) / 2);
+        this.originY = Math.max(10, (rect.height - worldHeightPx) / 2);
+        this.canvas.width = rect.width * dpr;
+        this.canvas.height = rect.height * dpr;
+        this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      }
+
+      _clear() {
+        this.ctx.fillStyle = '#0b0f18';
+        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+      }
+
+      _drawGrid() {
+        const { ctx, gridSize, gridWidth, gridHeight } = this;
+        const ox = this.originX;
+        const oy = this.originY;
+        ctx.save();
+        ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+        ctx.lineWidth = 1;
+        for (let x = 0; x <= gridWidth; x++) {
+          ctx.beginPath();
+          ctx.moveTo(ox + x * gridSize, oy);
+          ctx.lineTo(ox + x * gridSize, oy + gridHeight * gridSize);
+          ctx.stroke();
+        }
+        for (let y = 0; y <= gridHeight; y++) {
+          ctx.beginPath();
+          ctx.moveTo(ox, oy + y * gridSize);
+          ctx.lineTo(ox + gridWidth * gridSize, oy + y * gridSize);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+
+      _drawFog(obsData) {
+        const { ctx, gridSize, gridWidth, gridHeight } = this;
+        const ox = this.originX;
+        const oy = this.originY;
+        const visible = new Set((obsData.visible_positions || []).map(p => `${p[0]},${p[1]}`));
+        ctx.fillStyle = 'rgba(0,0,0,0.55)';
+        for (let x = 0; x < gridWidth; x++) {
+          for (let y = 0; y < gridHeight; y++) {
+            const key = `${x},${y}`;
+            if (!visible.has(key)) {
+              const py = (gridHeight - y - 1);
+              ctx.fillRect(ox + x * gridSize, oy + py * gridSize, gridSize, gridSize);
+            }
+          }
+        }
+      }
+
+      _drawRadar(entities = []) {
+        const { ctx, gridSize, gridHeight } = this;
+        const ox = this.originX;
+        const oy = this.originY;
+        ctx.save();
+        for (const e of entities) {
+          if (!e.is_alive) continue;
+          if (this.viewMode !== 'god' && e.team.toLowerCase() !== this.viewMode) continue;
+          const [x, y] = e.position;
+          const px = ox + x * gridSize + gridSize / 2;
+          const py = oy + (gridHeight - y - 1) * gridSize + gridSize / 2;
+          const range = e.active_radar || 0;
+          if (range <= 0) continue;
+          ctx.fillStyle = e.team === 'BLUE' ? 'rgba(90,165,255,0.18)' : 'rgba(255,107,107,0.18)';
+          ctx.beginPath();
+          ctx.arc(px, py, range * gridSize, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+
+      _drawEntities(entities = []) {
+        const { ctx, gridSize, gridHeight } = this;
+        const ox = this.originX;
+        const oy = this.originY;
+        ctx.font = '11px "Segoe UI", system-ui';
+        for (const entity of entities) {
+          if (this.viewMode !== 'god' && this.hasObservations) {
+            const isFriendly = entity.team.toLowerCase() === this.viewMode;
+            const isVisible = this.visibleIds.has(entity.id);
+            if (!isFriendly && !isVisible) {
+              continue;
+            }
+          }
+
+          const [gx, gy] = entity.position;
+          const px = ox + gx * gridSize;
+          const py = oy + (gridHeight - gy - 1) * gridSize;
+          const cx = px + gridSize / 2;
+          const cy = py + gridSize / 2;
+          const color = entity.team === 'BLUE' ? TEAM_COLORS.BLUE : TEAM_COLORS.RED;
+          const kind = (entity.kind || entity.type || '').toString().toLowerCase();
+          const size = Math.max(20, Math.min(36, gridSize * 0.9));
+
+          ctx.save();
+          ctx.shadowColor = 'rgba(0,0,0,0.45)';
+          ctx.shadowBlur = 6;
+          const fillColor = entity.is_alive ? color : '#5c6474';
+          if (!entity.is_alive) {
+            ctx.globalAlpha = 0.65;
+          }
+
+          if (kind === 'aircraft') {
+            aircraftGlyph(ctx, cx, cy, size, fillColor);
+          } else if (kind === 'awacs') {
+            awacsGlyph(ctx, cx, cy, size, fillColor);
+          } else if (kind === 'sam') {
+            const cooldownInfo = {
+              remaining: entity.cooldown_remaining || 0,
+              total: entity.cooldown_remaining && entity.cooldown_remaining > 0 && entity.cooldown_remaining <= (entity.cooldown_steps || 0)
+                ? entity.cooldown_steps || 0
+                : entity.cooldown_steps || 0,
+            };
+            samGlyph(ctx, cx, cy, size, fillColor, !!entity.radar_on, cooldownInfo);
+          } else if (kind === 'decoy') {
+            decoyGlyph(ctx, cx, cy, size, fillColor);
+          } else {
+            // Fallback to rounded square
+            ctx.fillStyle = fillColor;
+            ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.roundRect(px + 4, py + 4, gridSize - 8, gridSize - 8, 8);
+            ctx.fill();
+            ctx.stroke();
+          }
+
+          // Labels
+          if (this.showIds) {
+            ctx.fillStyle = '#f8fafc';
+            ctx.fillText(`#${entity.id}`, px + 6, py + 16);
+          }
+          // missiles indicator
+          if (entity.missiles !== undefined && entity.missiles !== null) {
+            ctx.fillStyle = 'rgba(0,0,0,0.55)';
+            ctx.fillRect(px + gridSize - 22, py + gridSize - 18, 18, 14);
+            ctx.fillStyle = '#e5e7eb';
+            ctx.fillText(String(entity.missiles), px + gridSize - 18, py + gridSize - 7);
+          }
+          // radar on/off indicator for SAM
+          if (entity.radar_on !== null && entity.radar_on !== undefined) {
+            ctx.beginPath();
+            ctx.fillStyle = entity.radar_on ? '#8fe38f' : '#ff6b6b';
+            ctx.arc(px + gridSize - 10, py + 10, 4, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          // selection ring
+          if (this.selectedId === entity.id) {
+            selectionRing(ctx, cx, cy, gridSize * 0.48, color);
+          }
+          ctx.restore();
+        }
+      }
+
+      _drawActions(state) {
+        const { ctx, gridSize, gridHeight } = this;
+        const ox = this.originX;
+        const oy = this.originY;
+        for (const action of state.actions || []) {
+          const ent = state.entities.find(e => e.id === action.entity_id);
+          if (!ent) continue;
+          const isFriendly = ent.team.toLowerCase() === this.viewMode;
+          const isVisible = this.visibleIds.has(ent.id);
+          const restrictView = this.viewMode !== 'god' && this.hasObservations;
+          if (restrictView && !isFriendly && !isVisible) continue;
+          const [gx, gy] = ent.position;
+          const sx = ox + gx * gridSize + gridSize / 2;
+          const sy = oy + (gridHeight - gy - 1) * gridSize + gridSize / 2;
+          const color = ent.team === 'BLUE' ? TEAM_COLORS.BLUE : TEAM_COLORS.RED;
+          ctx.save();
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 3;
+          if (action.type === 'MOVE') {
+            const delta = { UP: [0, 1], DOWN: [0, -1], LEFT: [-1, 0], RIGHT: [1, 0] }[action.params.dir] || [0,0];
+            const tx = sx + delta[0] * gridSize;
+            const ty = sy - delta[1] * gridSize;
+            drawArrow(ctx, sx, sy, tx, ty, color);
+          } else if (action.type === 'SHOOT' && action.params.target_id !== undefined) {
+            const target = state.entities.find(e => e.id === action.params.target_id);
+            if (target) {
+              const targetFriendly = target.team.toLowerCase() === this.viewMode;
+              const targetVisible = this.visibleIds.has(target.id);
+              if (restrictView && !targetFriendly && !targetVisible) {
+                ctx.restore();
+                continue;
+              }
+              const [txg, tyg] = target.position;
+              const tx = ox + txg * gridSize + gridSize / 2;
+              const ty = oy + (gridHeight - tyg - 1) * gridSize + gridSize / 2;
+              drawArrow(ctx, sx, sy, tx, ty, '#fbbf24', true);
+            }
+          }
+          ctx.restore();
+        }
+      }
+    }
+
+    function drawArrow(ctx, x1, y1, x2, y2, color, dashed=false) {
+      ctx.save();
+      if (dashed) ctx.setLineDash([8, 6]);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      const angle = Math.atan2(y2 - y1, x2 - x1);
+      const size = 10;
+      ctx.beginPath();
+      ctx.moveTo(x2, y2);
+      ctx.lineTo(x2 - size * Math.cos(angle - 0.4), y2 - size * Math.sin(angle - 0.4));
+      ctx.lineTo(x2 - size * Math.cos(angle + 0.4), y2 - size * Math.sin(angle + 0.4));
+      ctx.closePath();
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // ================= Controller =================
+    class ReplayController {
+      constructor(renderer) {
+        this.renderer = renderer;
+        this.history = [];
+        this.currentTurn = 0;
+        this.isPlaying = false;
+        this.speed = 1.5;
+        this.timer = null;
+      }
+
+      loadHistory(history) {
+        this.history = history || [];
+        this.currentTurn = Math.max(0, this.history.length - 1);
+        this.render();
+        this._updateTimeline();
+      }
+
+      append(state) {
+        this.history.push(state);
+        this.currentTurn = this.history.length - 1;
+        this.render();
+        this._updateTimeline();
+      }
+
+      play() {
+        if (this.isPlaying || this.history.length === 0) return;
+        this.isPlaying = true;
+        this.timer = setInterval(() => this.step(), 1000 / this.speed);
+      }
+
+      pause() {
+        this.isPlaying = false;
+        clearInterval(this.timer);
+      }
+
+      step() {
+        if (this.currentTurn < this.history.length - 1) {
+          this.currentTurn += 1;
+          this.render();
+          this._updateTimeline(false);
+        } else {
+          this.pause();
+        }
+      }
+
+      jumpTo(turn) {
+        this.currentTurn = Math.max(0, Math.min(turn, this.history.length - 1));
+        this.render();
+        this._updateTimeline(false);
+      }
+
+      setSpeed(multiplier) {
+        this.speed = multiplier;
+        if (this.isPlaying) {
+          this.pause();
+          this.play();
+        }
+      }
+
+      render() {
+        const state = this.history[this.currentTurn];
+        if (!state) return;
+        this.renderer.drawState(state);
+        document.getElementById('turn-label').textContent = `Turn ${state.turn}`;
+        document.getElementById('timeline-scrubber').max = Math.max(0, this.history.length - 1);
+        document.getElementById('timeline-scrubber').value = this.currentTurn;
+        document.getElementById('timeline-label').textContent = `${this.currentTurn + 1} / ${this.history.length}`;
+        document.getElementById('game-status').textContent = state.game_over ? 'Finished' : 'In progress';
+        document.getElementById('winner').textContent = state.winner ? `Winner: ${state.winner}` : '';
+        document.getElementById('tracking').textContent =
+          `No Shoot: ${state.tracking.turns_without_shooting} | No Move: ${state.tracking.turns_without_movement}`;
+        const blue = state.entities.filter(e => e.team === 'BLUE' && e.is_alive).length;
+        const red = state.entities.filter(e => e.team === 'RED' && e.is_alive).length;
+        document.getElementById('team-counts').textContent = `Blue ${blue} / Red ${red}`;
+      }
+
+      _updateTimeline(updateValue = true) {
+        const scrubber = document.getElementById('timeline-scrubber');
+        scrubber.max = Math.max(0, this.history.length - 1);
+        if (updateValue) scrubber.value = this.currentTurn;
+      }
+    }
+
+    // ================= WebSocket =================
+    class WebSocketManager {
+      constructor(controller) {
+        this.controller = controller;
+        this.socket = io();
+        this._register();
+      }
+
+      _register() {
+        const statusEl = document.getElementById('connection-status');
+        this.socket.on('connect', () => {
+          statusEl.textContent = '● Connected';
+          statusEl.style.color = '#8fe38f';
+          this.socket.emit('request_history');
+        });
+        this.socket.on('disconnect', () => {
+          statusEl.textContent = '● Disconnected';
+          statusEl.style.color = '#ff6b6b';
+        });
+        this.socket.on('state_update', (state) => {
+          this.controller.append(state);
+        });
+        this.socket.on('history', (payload) => {
+          this.controller.loadHistory(payload.turns || []);
+        });
+      }
+    }
+
+    // ================= UI Wiring =================
+    function formatActionLabel(action) {
+      if (!action) return 'None';
+      if (action.label) return action.label;
+      const type = action.type || '';
+      if (type === 'MOVE' && action.params?.dir) return `MOVE ${action.params.dir}`;
+      if (type === 'SHOOT' && action.params?.target_id !== undefined) return `SHOOT target=${action.params.target_id}`;
+      if (type === 'TOGGLE' && action.params?.on !== undefined) return `TOGGLE ${action.params.on ? 'ON' : 'OFF'}`;
+      return type || 'None';
+    }
+
+    window.onload = () => {
+      const canvas = document.getElementById('main-canvas');
+      const renderer = new GameRenderer(canvas);
+      const controller = new ReplayController(renderer);
+      const wsManager = new WebSocketManager(controller);
+
+      document.getElementById('play-btn').onclick = () => controller.play();
+      document.getElementById('pause-btn').onclick = () => controller.pause();
+      document.getElementById('step-btn').onclick = () => controller.step();
+      document.getElementById('speed-select').onchange = (e) => controller.setSpeed(parseFloat(e.target.value));
+      document.getElementById('timeline-scrubber').oninput = (e) => controller.jumpTo(parseInt(e.target.value, 10));
+
+      document.getElementById('view-select').onchange = (e) => {
+        renderer.viewMode = e.target.value;
+        controller.render();
+      };
+      document.getElementById('toggle-actions').onchange = (e) => { renderer.showActions = e.target.checked; controller.render(); };
+      document.getElementById('toggle-radar').onchange = (e) => { renderer.showRadar = e.target.checked; controller.render(); };
+      document.getElementById('toggle-ids').onchange = (e) => { renderer.showIds = e.target.checked; controller.render(); };
+
+      // Canvas click to select entity
+      canvas.addEventListener('click', (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const offsetX = e.clientX - rect.left;
+        const offsetY = e.clientY - rect.top;
+        const x = Math.floor((offsetX - renderer.originX) / renderer.gridSize);
+        const y = renderer.gridHeight - 1 - Math.floor((offsetY - renderer.originY) / renderer.gridSize);
+        const state = controller.history[controller.currentTurn];
+        if (!state) return;
+        const entity = state.entities.find(ent => ent.position[0] === x && ent.position[1] === y);
+        if (entity) {
+          const action = (state.actions || []).find(a => a.entity_id === entity.id);
+          const actionLabel = formatActionLabel(action);
+          renderer.selectedId = entity.id;
+          controller.render();
+          document.getElementById('entity-info').innerHTML = `
+            <div><strong>${entity.type}</strong> (${entity.team})</div>
+            <div>ID: #${entity.id}</div>
+            <div>Status: ${entity.is_alive ? 'Alive' : 'Destroyed'}</div>
+            <div>Action: ${actionLabel}</div>
+            <div>Position: (${entity.position[0]}, ${entity.position[1]})</div>
+            <div>Missiles: ${entity.missiles ?? '—'}</div>
+            <div>Radar: ${entity.active_radar ?? 0}</div>
+          `;
+        }
+      });
+
+      // Handle resize
+      const resize = () => controller.render();
+      window.addEventListener('resize', resize);
+    };
+  </script>
+</body>
+</html>

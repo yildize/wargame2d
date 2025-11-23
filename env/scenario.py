@@ -263,7 +263,7 @@ def create_mixed_scenario() -> Scenario:
         grid_width=20,
         grid_height=20,
         max_stalemate_turns=60,
-        max_no_move_turns=15,
+        max_no_move_turns=100,
         seed=42,
         # Blue team - Combined arms
         blue_entities=[
