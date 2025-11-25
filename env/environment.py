@@ -17,21 +17,13 @@ Usage:
         state, rewards, done, info = env.step(actions)
     
     print(f"Winner: {state['world'].winner}")
-    
+
 State Structure:
     {
-        "world": WorldState,  # Raw world object (use team views for fog-of-war)
-        "tracking": {
-            "turns_without_shooting": int,
-            "turns_without_movement": int,
-        },
-        "config": {
-            "max_stalemate_turns": int,
-            "max_no_move_turns": int,
-            "max_turns": int | None,
-            "check_missile_exhaustion": bool,
-        }
+        "world": WorldState  # Raw world object (use team views for fog-of-war)
     }
+
+Config is available on the Scenario used to create the environment.
 """
 
 from __future__ import annotations
@@ -143,17 +135,9 @@ class GridCombatEnv:
         Args:
             scenario: Scenario instance or Dict from Scenario.to_dict():
                 {
-                    "config": {
-                        "grid_width": int,
-                        "grid_height": int,
-                        "max_stalemate_turns": int,
-                        "max_no_move_turns": int,
-                        "max_turns": int | None,
-                        "check_missile_exhaustion": bool,
-                        "seed": int | None
-                    },
-                    "blue_entities": [entity1, entity2, ...],
-                    "red_entities": [entity3, entity4, ...]
+                    "config": {...},
+                    "entities": [entity1, entity2, ...],
+                    "agents": {...}  # optional
                 }
             world: Optional WorldState or dict (from WorldState.to_dict()).
                 If provided, the environment will resume from this world
@@ -199,9 +183,7 @@ class GridCombatEnv:
             self.world.turns_without_movement = 0
             
             # Add entities from scenario
-            for entity in scenario_obj.blue_entities:
-                self.world.add_entity(entity)
-            for entity in scenario_obj.red_entities:
+            for entity in scenario_obj.entities:
                 self.world.add_entity(entity)
         else:
             # Resume from provided world (clone to avoid side effects)
@@ -303,19 +285,14 @@ class GridCombatEnv:
         Build complete state representation.
         
         The state includes the shared world object (fog-of-war is handled
-        via team views), tracking counters, and configuration.
+        via team views). Scenario config should be read from the scenario
+        object itself.
         
         Returns:
-            Dictionary with world, tracking, and config
+            Dictionary containing the world object
         """
         return {
             "world": self.world,
-            "config": {
-                "max_stalemate_turns": self._scenario.max_stalemate_turns,
-                "max_no_move_turns": self._scenario.max_no_move_turns,
-                "max_turns": self._scenario.max_turns,
-                "check_missile_exhaustion": self._scenario.check_missile_exhaustion,
-            },
         }
     
     def _housekeeping(self) -> None:

@@ -34,7 +34,6 @@ class RenderStateBuilder:
             raise ValueError("State missing 'world' key required for rendering")
 
         world: WorldState = state["world"]
-        config = state.get("config", {})
 
         return {
             "turn": world.turn,
@@ -49,7 +48,6 @@ class RenderStateBuilder:
                 "turns_without_shooting": world.turns_without_shooting,
                 "turns_without_movement": world.turns_without_movement,
             },
-            "config": config,
             "entities": RenderStateBuilder._serialize_entities(world),
             "observations": RenderStateBuilder._serialize_observations(world),
             "actions": RenderStateBuilder._serialize_actions(actions),

@@ -59,12 +59,9 @@ class BaseAgent(ABC):
         State structure:
             {
                 "world": WorldState,  # Contains team_views
-                "config": {
-                    "max_stalemate_turns": int,
-                    "max_no_move_turns": int,
-                    "check_missile_exhaustion": bool,
-                }
             }
+        Scenario configuration (e.g., max_turns) should be read from the
+        Scenario used to initialize the environment, not from this state dict.
         step_info:
             Optional per-turn resolution info from the previous step.
             Agents must still respect fog-of-war if they use it.

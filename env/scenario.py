@@ -5,13 +5,18 @@ Provides type-safe Python definitions for scenarios and JSON serialization.
 """
 
 from __future__ import annotations
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, TYPE_CHECKING
 import json
 from pathlib import Path
+import time
 
+from paths import PROJECT_ROOT, SCENARIO_STORAGE_DIR
 from .entities.base import Entity
 from .entities import Aircraft, AWACS, SAM, Decoy
 from .core.types import Team
+
+if TYPE_CHECKING:
+    from agents import AgentSpec
 
 
 class Scenario:
@@ -26,43 +31,18 @@ class Scenario:
     
     This makes scenarios reproducible and portable.
     
-    Example:
-        # Option 1: Pass entities to constructor
+    Example (entities carry their own team):
         scenario = Scenario(
             grid_width=20,
             grid_height=20,
-            max_stalemate_turns=60,
-            max_no_move_turns=15,
-            seed=42,
-            blue_entities=[
+            entities=[
                 Aircraft(team=Team.BLUE, pos=(2, 10), missiles=4, ...),
-                Aircraft(team=Team.BLUE, pos=(4, 10), missiles=4, ...)
+                Aircraft(team=Team.RED, pos=(18, 10), missiles=4, ...),
             ],
-            red_entities=[
-                Aircraft(team=Team.RED, pos=(18, 10), missiles=4, ...)
-            ]
         )
-        
-        # Option 2: Build incrementally
-        scenario = Scenario(grid_width=20, grid_height=20, seed=42)
-        scenario.add_blue(Aircraft(
-            team=Team.BLUE, pos=(2, 10),
-            missiles=4, radar_range=5.0,
-            missile_max_range=4.0,
-            base_hit_prob=0.8, min_hit_prob=0.1
-        ))
-        scenario.add_red(Aircraft(team=Team.RED, pos=(18, 10), ...))
-        
-        # Save to JSON
         scenario.save_json("my_scenario.json")
-        
-        # Load from JSON
         scenario = Scenario.load_json("my_scenario.json")
-        
-        # Use in environment
-        env = GridCombatEnv()
-        state = env.reset(scenario=scenario.to_dict())
-    """
+"""
     
     def __init__(
         self,
@@ -73,23 +53,22 @@ class Scenario:
         max_turns: Optional[int] = None,
         check_missile_exhaustion: bool = True,
         seed: Optional[int] = None,
-        blue_entities: Optional[List[Entity]] = None,
-        red_entities: Optional[List[Entity]] = None,
-        agents: Optional[Dict[str, Any]] = None,
+        entities: Optional[List[Entity]] = None,
+        agents: Optional[List["AgentSpec"]] = None,
     ):
         """
         Initialize a scenario with game configuration.
         
         Args:
-            grid_width: Width of the grid
-            grid_height: Height of the grid
-            max_stalemate_turns: Max turns without shooting before draw
-            max_no_move_turns: Max turns without movement before draw
-            max_turns: Optional hard cap on total turns before draw
-            check_missile_exhaustion: Check if all missiles depleted
+            grid_width: Width of the grid (columns)
+            grid_height: Height of the grid (rows)
+            max_stalemate_turns: Turns without shooting before declaring a draw
+            max_no_move_turns: Turns without movement before declaring a draw
+            max_turns: Optional hard cap on total turns before declaring a draw
+            check_missile_exhaustion: End game early if all missiles are gone
             seed: Random seed for reproducibility (None = random)
-            blue_entities: Optional list of Blue team entities
-            red_entities: Optional list of Red team entities
+            entities: Optional list of entities (team carried on each entity)
+            agents: Optional list of AgentSpec (one per team)
         """
         # Game configuration
         self.grid_width = grid_width
@@ -99,49 +78,19 @@ class Scenario:
         self.max_turns = max_turns
         self.check_missile_exhaustion = check_missile_exhaustion
         self.seed = seed
-        self.agents: Optional[Dict[str, Any]] = agents
+        self.agents: Optional[List["AgentSpec"]] = agents
         
         # Entities
-        self.blue_entities: List[Entity] = []
-        self.red_entities: List[Entity] = []
-        
-        # Add entities if provided
-        if blue_entities:
-            for entity in blue_entities:
-                self.add_blue(entity)
-        
-        if red_entities:
-            for entity in red_entities:
-                self.add_red(entity)
+        self.entities: List[Entity] = []
+        if entities:
+            for entity in entities:
+                self.add_entity(entity)
     
-    def add_blue(self, entity: Entity) -> Scenario:
-        """
-        Add a Blue team entity.
-        
-        Args:
-            entity: Entity to add
-        
-        Returns:
-            self (for method chaining)
-        """
-        if entity.team != Team.BLUE:
-            raise ValueError(f"Entity must be Team.BLUE, got {entity.team}")
-        self.blue_entities.append(entity)
-        return self
-    
-    def add_red(self, entity: Entity) -> Scenario:
-        """
-        Add a Red team entity.
-        
-        Args:
-            entity: Entity to add
-        
-        Returns:
-            self (for method chaining)
-        """
-        if entity.team != Team.RED:
-            raise ValueError(f"Entity must be Team.RED, got {entity.team}")
-        self.red_entities.append(entity)
+    def add_entity(self, entity: Entity) -> Scenario:
+        """Add an entity (team must be set on the entity)."""
+        if entity.team not in (Team.BLUE, Team.RED):
+            raise ValueError(f"Entity team must be BLUE or RED, got {entity.team}")
+        self.entities.append(entity)
         return self
 
     def clone(self) -> Scenario:
@@ -158,7 +107,7 @@ class Scenario:
         Convert to dictionary format for env.reset().
         
         Returns:
-            Dict with config and entities
+            Dict with config, entities, and optional agent specs
         """
         data = {
             "config": {
@@ -170,8 +119,7 @@ class Scenario:
             "check_missile_exhaustion": self.check_missile_exhaustion,
             "seed": self.seed,
         },
-            "blue_entities": self.blue_entities,
-            "red_entities": self.red_entities
+            "entities": self.entities,
         }
         if self.agents is not None:
             data["agents"] = self._serialize_agents(self.agents)
@@ -194,8 +142,7 @@ class Scenario:
             "check_missile_exhaustion": self.check_missile_exhaustion,
             "seed": self.seed,
         },
-            "blue_entities": [e.to_dict() for e in self.blue_entities],
-            "red_entities": [e.to_dict() for e in self.red_entities]
+            "entities": [e.to_dict() for e in self.entities],
         }
         if self.agents is not None:
             data["agents"] = self._serialize_agents(self.agents)
@@ -222,17 +169,12 @@ class Scenario:
             max_turns=config.get("max_turns"),
             check_missile_exhaustion=config.get("check_missile_exhaustion", True),
             seed=config.get("seed"),
-            agents=data.get("agents"),
+            agents=cls._deserialize_agents(data.get("agents")),
         )
         
         # Load entities
-        for entity_data in data.get("blue_entities", []):
-            entity = Entity.from_dict(entity_data)
-            scenario.blue_entities.append(entity)
-        
-        for entity_data in data.get("red_entities", []):
-            entity = Entity.from_dict(entity_data)
-            scenario.red_entities.append(entity)
+        for entity_data in data.get("entities", []):
+            scenario.entities.append(Entity.from_dict(entity_data))
         
         return scenario
 
@@ -253,7 +195,7 @@ class Scenario:
             max_turns=config.get("max_turns"),
             check_missile_exhaustion=config.get("check_missile_exhaustion", True),
             seed=config.get("seed"),
-            agents=data.get("agents"),
+            agents=cls._deserialize_agents(data.get("agents")),
         )
 
         def _to_entity(e: Any) -> Entity:
@@ -261,35 +203,58 @@ class Scenario:
                 return Entity.from_dict(e.to_dict())
             return Entity.from_dict(e)
 
-        for entity_data in data.get("blue_entities", []):
-            scenario.blue_entities.append(_to_entity(entity_data))
-
-        for entity_data in data.get("red_entities", []):
-            scenario.red_entities.append(_to_entity(entity_data))
+        for entity_data in data.get("entities", []):
+            scenario.entities.append(_to_entity(entity_data))
 
         return scenario
 
     @staticmethod
-    def _serialize_agents(agents: Dict[str, Any]) -> Dict[str, Any]:
+    def _serialize_agents(agents: List["AgentSpec"]) -> List[Dict[str, Any]]:
         """
         Best-effort serialization for agent specs; uses to_dict when available.
         """
-        serialized: Dict[str, Any] = {}
-        for key, value in agents.items():
-            if hasattr(value, "to_dict"):
-                serialized[key] = value.to_dict()  # type: ignore[attr-defined]
-            else:
-                serialized[key] = value
+        # Local import to avoid circular imports during module load
+        from agents import AgentSpec
+        serialized: List[Dict[str, Any]] = []
+        for value in agents:
+            serialized.append(value.to_dict() if isinstance(value, AgentSpec) else value)  # type: ignore[arg-type]
         return serialized
     
-    def save_json(self, filepath: str | Path, indent: int = 2) -> None:
+    @staticmethod
+    def _deserialize_agents(data: Any) -> Optional[List["AgentSpec"]]:
+        if data is None:
+            return None
+        # Local import to avoid circular imports during module load
+        from agents import AgentSpec
+        agents_list: List[AgentSpec] = []
+        for value in data:
+            if isinstance(value, AgentSpec):
+                agents_list.append(value)
+            elif isinstance(value, dict):
+                agents_list.append(AgentSpec.from_dict(value))
+            else:
+                raise TypeError(f"Agent definition must be AgentSpec or dict, got {type(value)}")
+        return agents_list
+    
+    def save_json(self, filepath: str | Path | None = None, indent: int = 2) -> None:
         """
         Save scenario to JSON file.
         
         Args:
-            filepath: Path to save to
+            filepath: Path to save to. If None, saves under storage/scenarios with a timestamped name.
             indent: JSON indentation (default: 2)
         """
+        if filepath is None:
+            base_dir = SCENARIO_STORAGE_DIR
+            base_dir.mkdir(parents=True, exist_ok=True)
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            filepath = base_dir / f"scenario_{timestamp}.json"
+        else:
+            filepath = Path(filepath)
+            if not filepath.is_absolute():
+                filepath = PROJECT_ROOT / filepath
+            filepath.parent.mkdir(parents=True, exist_ok=True)
+
         with open(filepath, 'w') as f:
             json.dump(self.to_json_dict(), f, indent=indent, ensure_ascii=False)
     
@@ -310,13 +275,11 @@ class Scenario:
     
     def __str__(self) -> str:
         """String representation."""
-        return (f"Scenario(blue={len(self.blue_entities)}, "
-                f"red={len(self.red_entities)})")
+        return f"Scenario(entities={len(self.entities)})"
     
     def __repr__(self) -> str:
         """Detailed representation."""
-        return (f"Scenario(blue_entities={self.blue_entities}, "
-                f"red_entities={self.red_entities})")
+        return f"Scenario(entities={self.entities})"
 
 
 # =============================================================================
@@ -336,8 +299,8 @@ def create_mixed_scenario() -> Scenario:
         max_no_move_turns=100,
         max_turns=50,
         seed=42,
-        # Blue team - Combined arms
-        blue_entities=[
+        entities=[
+            # Blue team - Combined arms
             AWACS(
                 team=Team.BLUE, pos=(1, 10),
                 radar_range=9.0
@@ -367,10 +330,8 @@ def create_mixed_scenario() -> Scenario:
                 min_hit_prob=0.1,
                 cooldown_steps=5,
                 on=True
-            )
-        ],
-        # Red team - Combined arms
-        red_entities=[
+            ),
+            # Red team - Combined arms
             AWACS(
                 team=Team.RED, pos=(19, 10),
                 radar_range=9.0

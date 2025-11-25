@@ -85,15 +85,11 @@ def main():
     # Create agents
     blue_agent = RandomAgent(
         team=Team.BLUE, 
-        name="Blue Random",
-        shoot_probability=0.6,  # More aggressive
-        move_probability=0.4    # Less movement
+        name="Blue Random"
     )
     red_agent = RandomAgent(
         team=Team.RED, 
-        name="Red Random",
-        shoot_probability=0.6,
-        move_probability=0.4
+        name="Red Random"
     )
     
     # Single game with verbose output

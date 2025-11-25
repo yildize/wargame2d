@@ -7,7 +7,7 @@ This module provides:
 """
 
 from .base_agent import BaseAgent
-from .factory import PreparedAgent, create_agent_from_spec, normalize_agent_input
+from .factory import PreparedAgent, create_agent_from_spec
 from .registry import register_agent, resolve_agent_class
 from .spec import AgentSpec
 from .random_agent import RandomAgent
@@ -17,7 +17,6 @@ __all__ = [
     "AgentSpec",
     "PreparedAgent",
     "create_agent_from_spec",
-    "normalize_agent_input",
     "register_agent",
     "resolve_agent_class",
     "RandomAgent",

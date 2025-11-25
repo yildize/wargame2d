@@ -899,7 +899,7 @@ env.reset(scenario: Scenario | Dict[str, Any]) -> Dict[str, Any]
 # Execute turn (main game loop)
 env.step(actions: Dict[int, Action]) -> Tuple[state, rewards, done, info]
 # Returns:
-#   state: Dict with 'world', 'tracking', 'config' keys
+#   state: Dict with 'world' key
 #   rewards: Dict[Team, float]
 #   done: bool
 #   info: StepInfo
@@ -935,13 +935,8 @@ print(f"Game over: {world.game_over}")
 print(f"Winner: {world.winner}")
 
 # Access tracking counters
-tracking = state['tracking']
-print(f"Turns without shooting: {tracking['turns_without_shooting']}")
-print(f"Turns without movement: {tracking['turns_without_movement']}")
-
-# Access configuration
-config = state['config']
-print(f"Max stalemate turns: {config['max_stalemate_turns']}")
+print(f"Turns without shooting: {world.turns_without_shooting}")
+print(f"Turns without movement: {world.turns_without_movement}")
 
 # Access team views (fog of war)
 blue_view = world.get_team_view(Team.BLUE)
@@ -952,6 +947,9 @@ for obs in observations:
 # Check entities
 blue_entities = world.get_team_entities(Team.BLUE, alive_only=True)
 print(f"Blue alive: {len(blue_entities)}")
+
+# Scenario configuration
+# Read from the Scenario used during reset rather than the per-step state.
 ```
 
 ### Game Loop (Inside `step()`)
