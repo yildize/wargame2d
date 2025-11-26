@@ -164,6 +164,66 @@
     }
     .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; }
     .flex-between { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .summary-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; color: var(--muted); }
+    .link-btn {
+      background: rgba(124,210,255,0.08);
+      color: var(--accent);
+      border: 1px solid rgba(124,210,255,0.3);
+      padding: 6px 10px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 700;
+    }
+    .link-btn:hover { border-color: var(--accent); }
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 8px;
+      border-radius: 8px;
+      background: #0f1421;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      font-weight: 700;
+    }
+    .modal {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 50;
+    }
+    .modal.open { display: flex; }
+    .modal-backdrop {
+      position: absolute;
+      inset: 0;
+      background: rgba(8, 10, 16, 0.8);
+      backdrop-filter: blur(6px);
+    }
+    .modal-card {
+      position: relative;
+      width: min(900px, 92vw);
+      max-height: 86vh;
+      background: #0f1420;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px;
+      box-shadow: 0 14px 40px rgba(0,0,0,0.55);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      z-index: 1;
+    }
+    .modal-card textarea {
+      min-height: 320px;
+      max-height: 56vh;
+      width: 100%;
+      font-family: "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+      font-size: 12px;
+      background: #0b1020;
+    }
+    .modal-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   </style>
 </head>
 <body>
@@ -184,11 +244,8 @@
     <div class="surface" id="canvas-wrapper">
       <div class="flex-between">
         <div class="row">
-          <div class="btn-group">
-            <button id="play-btn" class="btn primary">▶ Play</button>
-            <button id="pause-btn" class="btn">⏸ Pause</button>
-            <button id="step-btn" class="btn">⏭ Step</button>
-          </div>
+          <button id="play-toggle-btn" class="btn primary">▶ Play</button>
+          <button id="step-btn" class="btn">⏭ Step</button>
           <label class="label">Speed</label>
           <input id="speed-slider" type="range" min="0.25" max="3" step="0.25" value="1" style="width:140px;">
           <span id="speed-label" class="pill">1.0x</span>
@@ -238,7 +295,11 @@
               <button class="btn primary" id="start-btn">Start Live Game</button>
               <button class="btn" id="export-btn">Export Recording</button>
             </div>
-            <div id="scenario-summary" style="margin-top:8px;color:var(--muted);"></div>
+            <div class="summary-row" id="scenario-summary-row">
+              <div id="scenario-summary" class="summary-text">No scenario loaded.</div>
+              <button class="link-btn" id="scenario-view-btn" style="display:none">View / Edit JSON</button>
+              <button class="link-btn" id="scenario-clear-btn" style="display:none">Clear</button>
+            </div>
           </div>
           <div>
             <div class="drop-zone" id="recording-drop">Drop recording JSON (frames) or click to choose</div>
@@ -247,20 +308,22 @@
               <button class="btn" id="replay-btn">Enter Replay Mode</button>
               <button class="btn" id="resume-from-frame-btn">Start backend from this frame</button>
             </div>
-            <div id="recording-summary" style="margin-top:8px;color:var(--muted);"></div>
+            <div class="summary-row" id="recording-summary-row">
+              <div id="recording-summary" class="summary-text">No recording loaded.</div>
+              <button class="link-btn" id="recording-scenario-view-btn" style="display:none">View recording scenario</button>
+              <button class="link-btn" id="recording-clear-btn" style="display:none">Clear</button>
+            </div>
           </div>
         </div>
       </div>
 
       <div class="surface">
         <div class="card-title">Loop Controls</div>
-        <div class="row">
-          <label class="label" style="min-width:80px;">Injections JSON</label>
-          <textarea id="injection-input" placeholder='{"blue": {...}, "red": {...}}'></textarea>
-        </div>
-        <div class="row">
-          <button class="btn" id="apply-injection-btn">Apply to next step</button>
-          <button class="btn ghost" id="clear-injection-btn">Clear</button>
+        <div class="row" style="justify-content: space-between; align-items: center;">
+          <div class="row" style="gap:10px;">
+            <span class="label">Injections</span>
+            <button class="btn" id="open-injection-modal-btn">Open editor</button>
+          </div>
           <span class="pill" id="injection-status">No pending injection</span>
         </div>
       </div>
@@ -302,6 +365,54 @@
     </div>
   </div>
 
+  <div class="modal" id="scenario-modal">
+    <div class="modal-backdrop"></div>
+    <div class="modal-card">
+      <div class="flex-between">
+        <div>
+          <div class="label" id="scenario-modal-label">Scenario JSON</div>
+          <div class="tag" id="scenario-modal-meta">—</div>
+        </div>
+        <button class="btn ghost" id="scenario-modal-close">Close</button>
+      </div>
+      <textarea id="scenario-modal-editor" spellcheck="false"></textarea>
+      <div class="modal-actions">
+        <button class="btn primary" id="scenario-modal-save">Save changes</button>
+        <button class="btn" id="scenario-modal-use-live">Save + use for live game</button>
+        <span class="pill warn" id="scenario-modal-status">Viewing only</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="injection-modal">
+    <div class="modal-backdrop"></div>
+    <div class="modal-card">
+      <div class="flex-between">
+        <div>
+          <div class="label">Injection JSON</div>
+          <div class="tag">Template: { "blue": {…}, "red": {…} }</div>
+        </div>
+        <button class="btn ghost" id="injection-modal-close">Close</button>
+      </div>
+      <textarea id="injection-modal-editor" spellcheck="false"></textarea>
+      <div class="row" style="gap:14px; align-items:center;">
+        <label class="row" style="gap:6px;">
+          <input type="radio" name="injection-mode" value="once" checked>
+          <span class="label">Apply once (next step)</span>
+        </label>
+        <label class="row" style="gap:6px;">
+          <input type="radio" name="injection-mode" value="persistent">
+          <span class="label">Apply every step</span>
+        </label>
+      </div>
+      <div class="modal-actions">
+        <button class="btn primary" id="apply-injection-btn">Apply</button>
+        <button class="btn ghost" id="clear-injection-btn">Clear</button>
+        <span class="pill warn" id="injection-modal-status">Not applied</span>
+      </div>
+    </div>
+  </div>
+
   <script>
     const canvas = document.getElementById("main-canvas");
     const ctx = canvas.getContext("2d");
@@ -322,6 +433,9 @@
       showRadar: false,
       showIds: true,
       view: "god",
+      scenarioName: null,
+      recordingName: null,
+      injectionMode: "once",
     };
 
     function isFrameDone(frame) {
@@ -355,8 +469,124 @@
       return `Grid ${cfg.grid_width || "?"}x${cfg.grid_height || "?"}, ${entities} entities, ${agents} agents`;
     }
 
+    function setPlaying(isPlaying) {
+      state.playing = isPlaying;
+      if (!isPlaying) clearTimeout(state.playTimer);
+      updatePlayButton();
+    }
+
+    function updatePlayButton() {
+      const btn = document.getElementById("play-toggle-btn");
+      if (!btn) return;
+      btn.textContent = state.playing ? "⏸ Pause" : "▶ Play";
+      btn.classList.toggle("primary", !state.playing);
+    }
+
     function renderJSON(el, data) {
       el.textContent = JSON.stringify(data ?? {}, null, 2);
+    }
+
+    function updateInjectionStatus(message = null, variant = null) {
+      const pill = document.getElementById("injection-status");
+      const modalPill = document.getElementById("injection-modal-status");
+      if (!state.pendingInjection) {
+        setStatus(pill, "No pending injection", "warn");
+        setStatus(modalPill, "Not applied", "warn");
+        return;
+      }
+      const modeLabel = state.injectionMode === "persistent" ? "every step" : "next step";
+      setStatus(pill, message || `Pending (${modeLabel})`, variant || "good");
+      setStatus(modalPill, message || `Pending (${modeLabel})`, variant || "good");
+    }
+
+    function getInjectionTemplate() {
+      return JSON.stringify({ blue: {}, red: {} }, null, 2);
+    }
+
+    function updateScenarioSummary() {
+      const summaryEl = document.getElementById("scenario-summary");
+      const viewBtn = document.getElementById("scenario-view-btn");
+      const clearBtn = document.getElementById("scenario-clear-btn");
+      if (!state.scenario) {
+        summaryEl.textContent = "No scenario loaded.";
+        viewBtn.style.display = "none";
+        clearBtn.style.display = "none";
+        return;
+      }
+      summaryEl.textContent = `Loaded ${state.scenarioName || "scenario.json"} — ${summarizeScenario(state.scenario)}`;
+      viewBtn.style.display = "inline-flex";
+      clearBtn.style.display = "inline-flex";
+    }
+
+    function updateRecordingSummary() {
+      const summaryEl = document.getElementById("recording-summary");
+      const viewBtn = document.getElementById("recording-scenario-view-btn");
+      const clearBtn = document.getElementById("recording-clear-btn");
+      if (!state.frames.length) {
+        summaryEl.textContent = "No recording loaded.";
+        viewBtn.style.display = "none";
+        clearBtn.style.display = "none";
+        return;
+      }
+      const scenarioNote = state.recordingScenario ? "scenario available" : "no scenario";
+      summaryEl.textContent = `Loaded ${state.recordingName || "recording.json"} — ${state.frames.length} frames, ${scenarioNote}`;
+      viewBtn.style.display = state.recordingScenario ? "inline-flex" : "none";
+      clearBtn.style.display = "inline-flex";
+    }
+
+    const modal = document.getElementById("scenario-modal");
+    const modalEditor = document.getElementById("scenario-modal-editor");
+    const modalLabel = document.getElementById("scenario-modal-label");
+    const modalMeta = document.getElementById("scenario-modal-meta");
+    const modalStatus = document.getElementById("scenario-modal-status");
+    let currentScenarioSource = null; // "scenario" | "recording"
+
+    function setModalStatus(text, variant = "warn") {
+      modalStatus.textContent = text;
+      modalStatus.classList.remove("good", "bad", "warn");
+      modalStatus.classList.add(variant);
+    }
+
+    function openScenarioModal(source) {
+      const data = source === "recording" ? state.recordingScenario : state.scenario;
+      if (!data) {
+        alert("No scenario loaded for this source.");
+        return;
+      }
+      currentScenarioSource = source;
+      modal.classList.add("open");
+      modalLabel.textContent = source === "recording" ? "Recording Scenario JSON" : "Game Scenario JSON";
+      const filename = source === "recording" ? (state.recordingName || "recording.json") : (state.scenarioName || "scenario.json");
+      modalMeta.textContent = `${filename} • editable`;
+      modalEditor.value = JSON.stringify(data, null, 2);
+      setModalStatus("Viewing only", "warn");
+    }
+
+    function closeScenarioModal() {
+      modal.classList.remove("open");
+      currentScenarioSource = null;
+    }
+
+    function saveScenarioFromEditor(useAsLive = false) {
+      if (!currentScenarioSource) return;
+      let parsed;
+      try {
+        parsed = JSON.parse(modalEditor.value);
+      } catch (err) {
+        setModalStatus("Invalid JSON: " + err.message, "bad");
+        return;
+      }
+      if (currentScenarioSource === "recording") {
+        state.recordingScenario = parsed;
+        if (useAsLive) state.scenario = parsed;
+        updateRecordingSummary();
+        if (useAsLive) updateScenarioSummary();
+        setModalStatus(useAsLive ? "Saved and set as live scenario" : "Recording scenario updated", "good");
+      } else {
+        state.scenario = parsed;
+        setModalStatus("Live scenario updated", "good");
+        updateScenarioSummary();
+      }
     }
 
     // ----------- Connection -----------
@@ -394,6 +624,7 @@
         } catch (err) {
           alert("Invalid JSON file");
         }
+        input.value = "";
       });
     }
 
@@ -402,7 +633,8 @@
       document.getElementById("scenario-file"),
       (json, name) => {
         state.scenario = json;
-        document.getElementById("scenario-summary").textContent = `Loaded ${name || "scenario.json"} — ${summarizeScenario(json)}`;
+        state.scenarioName = name || "scenario.json";
+        updateScenarioSummary();
       }
     );
 
@@ -414,13 +646,12 @@
           const parsed = normalizeRecording(json);
           state.frames = parsed.frames;
           state.recordingScenario = parsed.scenario || null;
+          state.recordingName = name || "recording.json";
           state.mode = "replay";
           state.currentIndex = 0;
-          state.playing = false;
+          setPlaying(false);
           updateTimeline();
-          document.getElementById("recording-summary").textContent =
-            `Loaded ${name || "recording.json"} — ${state.frames.length} frames` +
-            (state.recordingScenario ? `, scenario present` : "");
+          updateRecordingSummary();
           setModePill();
           drawCurrent();
           updateMeta();
@@ -450,8 +681,9 @@
         state.frames = [];
         state.currentIndex = 0;
         state.mode = "live";
-        state.playing = true;
+        setPlaying(true);
         state.pendingInjection = null;
+        updateInjectionStatus();
         updateTimeline();
         setModePill();
         await stepLive(); // fetch first frame
@@ -468,13 +700,17 @@
         method: "POST",
         body: JSON.stringify({ injections: injection }),
       });
+      if (state.pendingInjection && state.injectionMode === "once") {
+        state.pendingInjection = null;
+        updateInjectionStatus("Applied once; cleared", "warn");
+      }
       state.frames.push(frame);
       state.currentIndex = state.frames.length - 1;
       updateTimeline();
       drawCurrent();
       updateMeta();
       if (isFrameDone(frame)) {
-        state.playing = false;
+        setPlaying(false);
         setStatus(document.getElementById("status-pill"), "Status: finished", "warn");
         // Try to fetch the terminal world-only frame once
         if (frame.actions || frame.step_info || frame.action_metadata) {
@@ -500,7 +736,7 @@
       if (!state.playing) return;
       const frame = state.frames[state.currentIndex];
       if (state.mode === "live" && isFrameDone(frame)) {
-        state.playing = false;
+        setPlaying(false);
         return;
       }
       const delay = 800 / state.speed;
@@ -514,7 +750,7 @@
         } catch (err) {
           console.error(err);
           alert(err.message);
-          state.playing = false;
+          setPlaying(false);
         }
         if (state.playing) loop();
       }, delay);
@@ -526,7 +762,7 @@
       if (state.currentIndex < state.frames.length - 1) {
         state.currentIndex += 1;
       } else {
-        state.playing = false;
+        setPlaying(false);
       }
       updateTimeline();
       drawCurrent();
@@ -539,13 +775,33 @@
     });
     document.getElementById("ping-btn").addEventListener("click", pingBackend);
     document.getElementById("start-btn").addEventListener("click", () => startLive(null));
-    document.getElementById("play-btn").addEventListener("click", () => {
-      state.playing = true;
-      loop();
+    document.getElementById("scenario-view-btn").addEventListener("click", () => openScenarioModal("scenario"));
+    document.getElementById("recording-scenario-view-btn").addEventListener("click", () => openScenarioModal("recording"));
+    document.getElementById("scenario-clear-btn").addEventListener("click", () => {
+      state.scenario = null;
+      state.scenarioName = null;
+      updateScenarioSummary();
     });
-    document.getElementById("pause-btn").addEventListener("click", () => {
-      state.playing = false;
-      clearTimeout(state.playTimer);
+    document.getElementById("recording-clear-btn").addEventListener("click", () => {
+      setPlaying(false);
+      state.frames = [];
+      state.currentIndex = 0;
+      state.recordingScenario = null;
+      state.recordingName = null;
+      if (state.mode === "replay") state.mode = "idle";
+      updateRecordingSummary();
+      updateTimeline();
+      drawCurrent();
+      updateMeta();
+      setModePill();
+    });
+    document.getElementById("scenario-modal-close").addEventListener("click", closeScenarioModal);
+    document.querySelector("#scenario-modal .modal-backdrop").addEventListener("click", closeScenarioModal);
+    document.getElementById("scenario-modal-save").addEventListener("click", () => saveScenarioFromEditor(false));
+    document.getElementById("scenario-modal-use-live").addEventListener("click", () => saveScenarioFromEditor(true));
+    document.getElementById("play-toggle-btn").addEventListener("click", () => {
+      setPlaying(!state.playing);
+      if (state.playing) loop();
     });
     document.getElementById("step-btn").addEventListener("click", async () => {
       if (state.mode === "live") await stepLive();
@@ -580,7 +836,7 @@
       if (!state.frames.length) return alert("Load a recording first.");
       state.mode = "replay";
       state.currentIndex = 0;
-      state.playing = false;
+      setPlaying(false);
       setModePill();
       updateTimeline();
       drawCurrent();
@@ -602,28 +858,44 @@
       if (!state.recordingScenario && !state.scenario) {
         return alert("Recording missing scenario. Load a scenario first.");
       }
-      if (state.recordingScenario) state.scenario = state.recordingScenario;
+      if (state.recordingScenario) {
+        state.scenario = state.recordingScenario;
+        state.scenarioName = state.recordingName ? `${state.recordingName} scenario` : "recording scenario";
+        updateScenarioSummary();
+      }
       const frame = state.frames[state.currentIndex];
       startLive(frame.world ?? null);
     });
+    document.getElementById("open-injection-modal-btn").addEventListener("click", () => {
+      const editor = document.getElementById("injection-modal-editor");
+      editor.value = state.pendingInjection ? JSON.stringify(state.pendingInjection, null, 2) : getInjectionTemplate();
+      document.querySelectorAll('input[name="injection-mode"]').forEach(r => {
+        r.checked = r.value === state.injectionMode;
+      });
+      document.getElementById("injection-modal").classList.add("open");
+    });
+    document.getElementById("injection-modal-close").addEventListener("click", () => {
+      document.getElementById("injection-modal").classList.remove("open");
+    });
+    document.querySelector("#injection-modal .modal-backdrop").addEventListener("click", () => {
+      document.getElementById("injection-modal").classList.remove("open");
+    });
     document.getElementById("apply-injection-btn").addEventListener("click", () => {
-      const raw = document.getElementById("injection-input").value.trim();
-      if (!raw) {
-        state.pendingInjection = {};
-        setStatus(document.getElementById("injection-status"), "Pending empty injection", "warn");
-        return;
-      }
+      const raw = document.getElementById("injection-modal-editor").value.trim() || getInjectionTemplate();
       try {
         state.pendingInjection = JSON.parse(raw);
-        setStatus(document.getElementById("injection-status"), "Pending custom injection", "good");
+        const selected = document.querySelector('input[name="injection-mode"]:checked');
+        state.injectionMode = selected ? selected.value : "once";
+        updateInjectionStatus(`Pending (${state.injectionMode === "persistent" ? "every step" : "next step"})`, "good");
       } catch (err) {
         alert("Injection must be valid JSON");
       }
     });
     document.getElementById("clear-injection-btn").addEventListener("click", () => {
       state.pendingInjection = null;
-      document.getElementById("injection-input").value = "";
-      setStatus(document.getElementById("injection-status"), "No pending injection", "warn");
+      state.injectionMode = "once";
+      document.getElementById("injection-modal-editor").value = getInjectionTemplate();
+      updateInjectionStatus();
     });
 
     // ----------- Rendering -----------
@@ -974,6 +1246,10 @@
     }
 
     // Init
+    updateScenarioSummary();
+    updateRecordingSummary();
+    updateInjectionStatus();
+    updatePlayButton();
     setModePill();
     pingBackend();
   </script>
