@@ -312,11 +312,11 @@
     <div class="row" style="gap:6px;">
       <label class="label" for="backend-url">Backend</label>
       <input id="backend-url" type="text" value="http://localhost:8000" style="width: 220px;">
-      <span id="connection-status" class="pill dot warn clickable">Disconnected</span>
+      <span id="connection-status" class="pill dot warn clickable">Checking...</span>
     </div>
     <div class="row" style="gap:8px;">
-      <button class="btn success" id="start-btn">▶ Launch Scenario</button>
-      <button class="btn" id="fork-btn" title="Start a new live run from the selected frame">⧉ Fork</button>
+      <button class="btn success" id="start-btn" disabled>▶ Launch Scenario</button>
+      <button class="btn" id="fork-btn" title="Start a new live run from the selected frame" disabled>⧉ Fork</button>
     </div>
     <div class="spacer"></div>
     <span class="pill" id="mode-pill">Idle</span>
@@ -909,6 +909,18 @@
       }
     }
 
+    async function pingBackendWithRetry(retries = 1, delayMs = 800) {
+      const pill = document.getElementById("connection-status");
+      setStatus(pill, "Checking...", "warn");
+      try {
+        await pingBackend();
+      } catch (err) {
+        if (retries > 0) {
+          setTimeout(() => pingBackendWithRetry(retries - 1, delayMs), delayMs);
+        }
+      }
+    }
+
     // ----------- File helpers -----------
     function attachDrop(zone, input, onData) {
       zone.addEventListener("click", () => input.click());
@@ -1114,7 +1126,6 @@
     document.getElementById("scenario-modal-close").addEventListener("click", closeScenarioModal);
     document.querySelector("#scenario-modal .modal-backdrop").addEventListener("click", closeScenarioModal);
     document.getElementById("scenario-modal-save").addEventListener("click", () => saveScenarioFromEditor(false));
-    document.getElementById("scenario-modal-save").addEventListener("click", () => saveScenarioFromEditor(false));
     document.getElementById("play-toggle-btn").addEventListener("click", () => {
       setPlaying(!state.playing);
       if (state.playing) loop();
@@ -1156,30 +1167,9 @@
         const a = document.createElement("a");
         a.href = url;
         a.download = "recording.json";
-        a.click();
-        URL.revokeObjectURL(url);
-        updateExportButton();
-      });
-    document.getElementById("resume-from-frame-btn").addEventListener("click", () => {
-      if (!state.frames.length) return alert("Load a recording and pick a frame.");
-      if (!state.recordingScenario && !state.scenario) {
-        return alert("Recording missing scenario. Load a scenario first.");
-      }
-      if (state.recordingScenario) {
-        state.scenario = state.recordingScenario;
-        state.scenarioName = state.recordingName ? `${state.recordingName} scenario` : "recording scenario";
-        if (state.uploadInfo?.kind === "recording") {
-          state.uploadInfo.detail = `${state.frames.length} frames • ${summarizeScenario(state.recordingScenario)}`;
-        }
-        updateStartButton();
-        updateExportButton();
-        updateUploadSummary();
-      }
-      const frame = state.frames[state.currentIndex];
-      const worldOverride = frame.world
-        ? { ...frame.world, game_over: false, winner: null }
-        : null;
-      startLive(worldOverride);
+      a.click();
+      URL.revokeObjectURL(url);
+      updateExportButton();
     });
     document.getElementById("open-injection-modal-btn").addEventListener("click", () => {
       const editor = document.getElementById("injection-modal-editor");
@@ -1620,7 +1610,7 @@
     updatePlayButton();
     updateForkButton();
     setModePill();
-    pingBackend();
+    pingBackendWithRetry(2, 800);
   </script>
 </body>
 </html>
