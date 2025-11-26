@@ -65,19 +65,6 @@ class GameRunner:
     # ------------------------------------------------------------------#
     # Core API
     # ------------------------------------------------------------------#
-    def get_initial_frame(
-        self,
-    ) -> Frame:
-        """
-        Return the frame for step 0 before any agent actions run.
-
-        Actions, action_metadata, and info are omitted because no step
-        has been taken yet.
-        """
-        return Frame(
-            world=self._state["world"],
-        )
-
     def step(
         self,
         injections: Optional[Dict[str, Any]] = None,
@@ -129,9 +116,12 @@ class GameRunner:
         Returns the final frame, or the full frame history if include_history
         is True.
         """
-        frames: list[Frame] = [self.get_initial_frame()]
-        while not self._done:
-            frames.append(self.step())
+        frames: list[Frame] = []
+        while True:
+            frame = self.step()
+            frames.append(frame)
+            if frame.done:
+                break
 
         return frames if include_history else frames[-1]
 
