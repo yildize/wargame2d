@@ -317,7 +317,6 @@
     <button class="btn success" id="start-btn">▶ Start Live</button>
     <div class="spacer"></div>
     <span class="pill" id="mode-pill">Idle</span>
-    <span class="pill" id="turn-pill">Turn 0</span>
   </header>
 
   <div id="app">
@@ -1476,7 +1475,6 @@
       lastFrame = frame;
       drawActions(frame, helpers);
       drawEntities(frame, helpers);
-      document.getElementById("turn-pill").textContent = `Turn ${frame.world.turn ?? frame.turn ?? state.currentIndex}`;
       document.getElementById("timeline").value = state.currentIndex;
       document.getElementById("timeline-label").textContent = `${state.currentIndex} / ${Math.max(state.frames.length - 1, 0)}`;
       const victory = getVictoryForIndex(state.currentIndex) || state.victoryInfo;
