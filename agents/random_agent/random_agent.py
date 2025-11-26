@@ -75,5 +75,7 @@ class RandomAgent(BaseAgent):
         metadata = {
             "policy": "random",
             "actions_count": len(actions),
+            "injections": {**kwargs},
+            "random": random.randint(1, 10)
         }
         return actions, metadata

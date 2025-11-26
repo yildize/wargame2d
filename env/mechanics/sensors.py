@@ -82,7 +82,6 @@ class SensorSystem:
                 kind=entity.kind,
                 team=entity.team,
                 position=entity.pos,
-                distance=0.0,
                 seen_by={entity.id}
             )
             team_view = world.get_team_view(entity.team)
@@ -142,7 +141,6 @@ class SensorSystem:
                 kind=apparent_kind,
                 team=target.team,
                 position=target.pos,
-                distance=distance,
                 seen_by={observer.id}
             )
             observations.append(obs)
@@ -272,4 +270,3 @@ class SensorSystem:
             return False
         
         return True
-

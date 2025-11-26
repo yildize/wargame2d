@@ -116,7 +116,8 @@ obs_set = ObservationSet()
 obs_set.add(obs)
 enemies = obs_set.filter_by_team(Team.RED)
 aircraft = obs_set.filter_by_kind(EntityKind.AIRCRAFT)
-closest = obs_set.get_closest_enemy(Team.BLUE)
+# Example: filter by team/kind
+enemy_planes = obs_set.filter_by_kinds({EntityKind.AIRCRAFT})
 ```
 
 ---

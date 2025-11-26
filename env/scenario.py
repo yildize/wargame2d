@@ -14,9 +14,8 @@ from paths import PROJECT_ROOT, SCENARIO_STORAGE_DIR
 from .entities.base import Entity
 from .entities import Aircraft, AWACS, SAM, Decoy
 from .core.types import Team
+from agents import AgentSpec
 
-if TYPE_CHECKING:
-    from agents import AgentSpec
 
 
 class Scenario:
@@ -299,6 +298,8 @@ def create_mixed_scenario() -> Scenario:
         max_no_move_turns=100,
         max_turns=50,
         seed=42,
+        agents=[AgentSpec(team=Team.BLUE, type="random", name="Blue Random Agent"),
+                AgentSpec(team=Team.RED, type="random", name="Red Random Agent")],
         entities=[
             # Blue team - Combined arms
             AWACS(

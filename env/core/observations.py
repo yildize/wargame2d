@@ -35,7 +35,6 @@ class Observation:
         kind: Type of entity (may be deceptive for decoys observed by enemies)
         team: Team affiliation
         position: Grid position
-        distance: Distance from observer
         seen_by: Set of entity IDs that can see this entity
     """
 
@@ -43,7 +42,6 @@ class Observation:
     kind: EntityKind
     team: Team
     position: GridPos
-    distance: float
     seen_by: Set[int] = field(default_factory=set)
 
     def is_friendly(self, observer_team: Team) -> bool:
@@ -66,7 +64,6 @@ class Observation:
             "kind": self.kind.value,  # Serialize enum as string value
             "team": self.team.value,
             "position": list(self.position),
-            "distance": self.distance,
             "seen_by": list(self.seen_by)
         }
 
@@ -86,7 +83,6 @@ class Observation:
             kind=EntityKind(data["kind"]),  # Deserialize string back to enum
             team=Team(data["team"]),
             position=tuple(data["position"]),
-            distance=data["distance"],
             seen_by=set(data["seen_by"])
         )
 
@@ -102,7 +98,7 @@ class Observation:
     def __str__(self) -> str:
         """Human-readable representation."""
         return (f"Obs(id={self.entity_id}, {self.kind.value}, {self.team.name}, "
-                f"pos={self.position}, dist={self.distance:.1f})")
+                f"pos={self.position})")
 
 
 # ============================================================================
@@ -163,12 +159,6 @@ class ObservationSet:
             if obs.is_enemy(observer_team)
         }
 
-    def get_closest_enemy(self, observer_team: Team) -> Optional[Observation]:
-        """Get the closest enemy observation."""
-        enemies = [obs for obs in self.observations.values()
-                   if obs.is_enemy(observer_team)]
-        return min(enemies, key=lambda obs: obs.distance) if enemies else None
-
     def get_friendly_ids(self, observer_team: Team) -> Set[int]:
         """Get IDs of all observed friendly entities."""
         return {
@@ -222,8 +212,6 @@ def filter_observations(
     *,
     teams: Optional[List[Team]] = None,
     kinds: Optional[List[EntityKind]] = None,
-    max_distance: Optional[float] = None,
-    min_distance: Optional[float] = None,
 ) -> List[Observation]:
     """
     Filter observations based on multiple criteria.
@@ -232,8 +220,6 @@ def filter_observations(
         obs_list: Observations to filter
         teams: Include only these teams (None = all)
         kinds: Include only these entity kinds (None = all)
-        max_distance: Maximum distance (None = no limit)
-        min_distance: Minimum distance (None = no limit)
 
     Returns:
         Filtered list of observations
@@ -245,11 +231,5 @@ def filter_observations(
 
     if kinds is not None:
         filtered = [obs for obs in filtered if obs.kind in kinds]
-
-    if max_distance is not None:
-        filtered = [obs for obs in filtered if obs.distance <= max_distance]
-
-    if min_distance is not None:
-        filtered = [obs for obs in filtered if obs.distance >= min_distance]
 
     return filtered

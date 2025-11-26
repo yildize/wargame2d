@@ -279,7 +279,7 @@ class GridCombatEnv:
         )
         
         return state, rewards, victory_result.is_game_over, info
-    
+
     def _build_state(self) -> Dict[str, Any]:
         """
         Build complete state representation.

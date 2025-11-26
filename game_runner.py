@@ -6,6 +6,7 @@ from agents import PreparedAgent, create_agent_from_spec
 from env import GridCombatEnv
 from env.core.types import Team
 from env.environment import StepInfo
+from env.mechanics.sensors import SensorSystem
 from env.scenario import Scenario
 from env.world import WorldState
 
@@ -83,7 +84,7 @@ class GameRunner:
             raise RuntimeError("Game is already finished")
 
         injections = injections or {}
-        world_before: WorldState = self._state["world"].clone()
+        world_before: WorldState = self._clone_world_with_observations(self._state["world"])
         blue_actions, blue_meta = self._blue_agent.agent.get_actions(
             self._state,
             step_info=self._last_info,
@@ -99,7 +100,7 @@ class GameRunner:
         self._state, _rewards, self._done, self._last_info = self.env.step(merged_actions)
 
         if self._done:
-            self._final_world = self._state["world"].clone()
+            self._final_world = self._clone_world_with_observations(self._state["world"])
 
         return Frame(
             world=world_before,
@@ -135,7 +136,7 @@ class GameRunner:
         Return the final world state without actions for terminal view.
         """
         world: WorldState | None = self._state.get("world")
-        return Frame(world=world.clone() if world else None, done=True)
+        return Frame(world=self._clone_world_with_observations(world) if world else None, done=True)
 
     # Helpers
     def _agent_from_scenario(self, scenario: Scenario, team: Team) -> PreparedAgent:
@@ -147,3 +148,16 @@ class GameRunner:
         if len(matches) > 1:
             raise ValueError(f"Multiple AgentSpecs found for team {team}")
         return create_agent_from_spec(matches[0])
+
+    def _clone_world_with_observations(self, world: WorldState) -> WorldState:
+        """
+        Clone the world and regenerate derived observation data.
+
+        Cloning strips transient sensor state (team views/visible ids)
+        because WorldState.to_dict() only persists persistent fields.
+        We refresh observations on the clone so UI consumers still get
+        the correct fog-of-war view.
+        """
+        clone = world.clone()
+        SensorSystem().refresh_all_observations(clone)
+        return clone
