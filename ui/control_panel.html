@@ -120,6 +120,7 @@
     .pill.good { color: var(--green); border-color: rgba(126,224,163,0.5); }
     .pill.bad { color: var(--red); border-color: rgba(255,123,123,0.5); }
     .pill.warn { color: var(--yellow); border-color: rgba(255,227,143,0.45); }
+    .pill.clickable { cursor: pointer; }
     .btn {
       appearance: none;
       background: #1b2235;
@@ -308,11 +309,10 @@
 <body>
   <header>
     <h1>WG Control Panel</h1>
-    <span id="connection-status" class="pill dot warn">Disconnected</span>
     <div class="row" style="gap:6px;">
       <label class="label" for="backend-url">Backend</label>
       <input id="backend-url" type="text" value="http://localhost:8000" style="width: 220px;">
-      <button class="btn" id="ping-btn">Test</button>
+      <span id="connection-status" class="pill dot warn clickable">Disconnected</span>
     </div>
     <button class="btn success" id="start-btn">▶ Start Live</button>
     <div class="spacer"></div>
@@ -1011,7 +1011,7 @@
     document.getElementById("backend-url").addEventListener("input", e => {
       state.baseUrl = e.target.value.trim().replace(/\/$/, "");
     });
-    document.getElementById("ping-btn").addEventListener("click", pingBackend);
+    document.getElementById("connection-status").addEventListener("click", pingBackend);
     document.getElementById("start-btn").addEventListener("click", () => startLive(null));
     document.getElementById("scenario-summary").addEventListener("click", () => openScenarioModal("scenario"));
     document.getElementById("recording-summary").addEventListener("click", () => openScenarioModal("recording"));
