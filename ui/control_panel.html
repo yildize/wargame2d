@@ -131,6 +131,12 @@
       font-weight: 700;
       transition: border-color 0.15s, transform 0.08s, background 0.2s;
     }
+    .btn:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+      border-color: var(--border);
+      transform: none;
+    }
     .btn:hover { border-color: var(--accent); }
     .btn:active { transform: translateY(1px); }
     .btn.primary { background: linear-gradient(180deg,#2b3954,#1f2a41); border-color: #39486b; }
@@ -601,6 +607,15 @@
       btn.classList.toggle("primary", !state.playing);
     }
 
+    function updateStartButton() {
+      const btn = document.getElementById("start-btn");
+      if (!btn) return;
+      const hasScenario = !!state.scenario;
+      btn.disabled = !hasScenario;
+      btn.textContent = state.mode === "live" && hasScenario ? "⟳ Restart Live" : "▶ Start Live";
+      btn.title = hasScenario ? "Start a new live run with the loaded scenario" : "Load a scenario to start";
+    }
+
     function renderJSON(el, data) {
       el.textContent = JSON.stringify(data ?? {}, null, 2);
     }
@@ -674,12 +689,14 @@
         summaryBtn.style.display = "none";
         clearBtn.style.display = "none";
         empty.style.display = "block";
+        updateStartButton();
         return;
       }
       summaryBtn.textContent = `${state.scenarioName || "scenario.json"} — ${summarizeScenario(state.scenario)}`;
       summaryBtn.style.display = "inline-flex";
       clearBtn.style.display = "inline-flex";
       empty.style.display = "none";
+      updateStartButton();
     }
 
     function updateRecordingSummary() {
@@ -1517,6 +1534,7 @@
 
     function setModePill() {
       setStatus(document.getElementById("mode-pill"), state.mode === "live" ? "Live" : state.mode === "replay" ? "Replay" : "Idle", "warn");
+      updateStartButton();
     }
 
     // Init
