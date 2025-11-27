@@ -18,7 +18,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
 class StartRequest(BaseModel):
     scenario: dict
     world: dict | None = None

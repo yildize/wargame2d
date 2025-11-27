@@ -193,6 +193,9 @@ class GridCombatEnv:
                 world_obj = WorldState.from_dict(world)
 
             # Validate grid dimensions against scenario config
+            # TODO: Burada farklı field'lerin de kontrolü gerekebilir ana fikir şu:
+            # TODO: Bu world daha önce kullanışmış snapshot alınmış, şimdi ben yeni bir scenario ile bunu başlatıyorum.
+            # Eğer grid size farklıysa mesela, devam eden oyunda bi anda harita değişikliği olacak tuhaf bi durum.
             grid = world_obj.grid
             if grid.width != scenario_obj.grid_width or grid.height != scenario_obj.grid_height:
                 raise ValueError(
