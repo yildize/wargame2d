@@ -1039,8 +1039,9 @@
           state.frames = [];
           state.currentIndex = 0;
         } else {
-          state.frames = state.frames.slice(0, state.currentIndex + 1);
-          state.currentIndex = state.frames.length - 1;
+          // Drop the forked frame itself; new frames will replace it
+          state.frames = state.frames.slice(0, state.currentIndex);
+          state.currentIndex = Math.max(0, state.frames.length - 1);
         }
         state.mode = "live";
         state.victoryInfo = null;
