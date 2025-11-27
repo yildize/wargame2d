@@ -10,6 +10,7 @@ from env.core.actions import Action
 from env.core.types import Team
 from env.world import WorldState
 from ..base_agent import BaseAgent
+from ..team_intel import TeamIntel
 from ..registry import register_agent
 
 if TYPE_CHECKING:
@@ -62,9 +63,10 @@ class RandomAgent(BaseAgent):
             Tuple of (actions, metadata)
         """
         world: WorldState = state["world"]
+        intel: TeamIntel = TeamIntel.build(world, self.team)
         actions = {}
         
-        for entity in world.get_team_entities(self.team):
+        for entity in intel.friendlies:
             if not entity.alive:
                 continue
             allowed = entity.get_allowed_actions(world)
