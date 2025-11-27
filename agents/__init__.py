@@ -11,6 +11,8 @@ from .factory import PreparedAgent, create_agent_from_spec
 from .registry import register_agent, resolve_agent_class
 from .spec import AgentSpec
 from .random_agent import RandomAgent
+from .greedy_agent import GreedyAgent
+from .team_intel import TeamIntel, VisibleEnemy
 
 __all__ = [
     "BaseAgent",
@@ -20,4 +22,7 @@ __all__ = [
     "register_agent",
     "resolve_agent_class",
     "RandomAgent",
+    "GreedyAgent",
+    "TeamIntel",
+    "VisibleEnemy",
 ]
