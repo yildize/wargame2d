@@ -120,7 +120,15 @@
     .pill.good { color: var(--green); border-color: rgba(126,224,163,0.5); }
     .pill.bad { color: var(--red); border-color: rgba(255,123,123,0.5); }
     .pill.warn { color: var(--yellow); border-color: rgba(255,227,143,0.45); }
-    .pill.clickable { cursor: pointer; }
+    .pill.clickable {
+      cursor: pointer;
+      transition: border-color 0.2s, color 0.2s, box-shadow 0.2s;
+    }
+    .pill.clickable:hover {
+      border-color: var(--accent);
+      color: var(--text);
+      box-shadow: 0 0 0 1px rgba(124,210,255,0.25);
+    }
     .btn {
       appearance: none;
       background: #1b2235;
@@ -409,6 +417,7 @@
       <div class="row">
         <div class="pill" id="winner-pill">Victory: —</div>
         <div class="pill" id="tracking-pill">Tracking: —</div>
+        <div class="pill" id="entity-pill">Entities: —</div>
       </div>
     </div>
     <div class="resize-handle" id="split-handle" title="Drag to resize"></div>
@@ -436,28 +445,9 @@
 
       <div class="surface">
         <div class="card-title">Loop Controls</div>
-        <div class="row" style="justify-content: space-between; align-items: center;">
-          <div class="row" style="gap:10px;">
-            <span class="label">Injections</span>
-          </div>
-          <span class="pill clickable" id="injection-status">No pending injection</span>
-        </div>
-      </div>
-
-      <div class="surface">
-        <div class="stack">
-          <div class="tile">
-            <strong>Game</strong>
-            <div id="game-meta">—</div>
-          </div>
-          <div class="tile">
-            <strong>Entities</strong>
-            <div id="entity-meta">—</div>
-          </div>
-          <div class="tile">
-            <strong>Mode</strong>
-            <div id="mode-meta">Idle</div>
-          </div>
+        <div class="row" style="gap:10px; align-items: center;">
+          <span class="label">Injections</span>
+          <button class="pill clickable" id="injection-status" type="button">No pending injection</button>
         </div>
       </div>
 
@@ -508,6 +498,7 @@
       </div>
       <textarea id="scenario-modal-editor" spellcheck="false"></textarea>
       <div class="modal-actions">
+        <span class="pill warn" id="scenario-modal-status">Ready to edit</span>
         <button class="btn primary" id="scenario-modal-save">Save changes</button>
       </div>
     </div>
@@ -711,7 +702,6 @@
       if (!state.pendingInjection) {
         setStatus(pill, "No pending injection", "warn");
         setStatus(modalPill, "Not applied", "warn");
-        pill.classList.remove("clickable");
         return;
       }
       const modeLabel = state.injectionMode === "persistent" ? "every step" : "next step";
@@ -881,6 +871,7 @@
     let lastFrame = null;
 
     function setModalStatus(text, variant = "warn") {
+      if (!modalStatus) return;
       modalStatus.textContent = text;
       modalStatus.classList.remove("good", "bad", "warn");
       modalStatus.classList.add(variant);
@@ -898,7 +889,7 @@
       const filename = source === "recording" ? (state.recordingName || "recording.json") : (state.scenarioName || "scenario.json");
       modalMeta.textContent = `${filename} • editable`;
       modalEditor.value = JSON.stringify(data, null, 2);
-      setModalStatus("Viewing only", "warn");
+      setModalStatus("Ready to edit", "warn");
     }
 
     function closeScenarioModal() {
@@ -1669,19 +1660,14 @@
 
     function updateMeta() {
       const frame = state.frames[state.currentIndex];
+      const pill = document.getElementById("entity-pill");
       if (!frame || !frame.world) {
-        document.getElementById("game-meta").textContent = "No frame loaded.";
-        document.getElementById("entity-meta").textContent = "—";
-        document.getElementById("mode-meta").textContent = state.mode;
+        pill.textContent = "Entities: —";
         return;
       }
       const entities = frame.entities || frame.world.entities || [];
       const alive = entities.filter(e => e.alive !== false).length;
-      document.getElementById("game-meta").textContent =
-        `Turn ${frame.turn ?? frame.world.turn}, game over: ${frame.world.game_over ? "yes" : "no"}`;
-      document.getElementById("entity-meta").textContent =
-        `${alive}/${entities.length} alive`;
-      document.getElementById("mode-meta").textContent = state.mode;
+      pill.textContent = `Entities: ${alive}/${entities.length} alive`;
       updateForkButton();
     }
 
