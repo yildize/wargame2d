@@ -355,22 +355,13 @@ dependencies = [
     { name = "uvicorn" },
 ]
 
-[package.optional-dependencies]
-rendering = [
-    { name = "flask" },
-    { name = "flask-socketio" },
-]
-
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = ">=0.122.0" },
     { name = "flask", specifier = ">=3.1.2" },
-    { name = "flask", marker = "extra == 'rendering'", specifier = ">=3.1.2" },
     { name = "flask-socketio", specifier = ">=5.5.1" },
-    { name = "flask-socketio", marker = "extra == 'rendering'", specifier = ">=5.5.1" },
     { name = "uvicorn", specifier = ">=0.38.0" },
 ]
-provides-extras = ["rendering"]
 
 [[package]]
 name = "wsproto"
