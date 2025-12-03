@@ -2,7 +2,7 @@
 
 2D turn-based air combat sim with a FastAPI backend and a lightweight HTML control panel.
 
-## Get Running (Python 3.11+)
+## Get Running (Python 3.14+)
 1) Install uv (once): `pip install uv`
 2) Install deps: `uv sync`
 3) Launch backend + UI: `uv run python main.py`
