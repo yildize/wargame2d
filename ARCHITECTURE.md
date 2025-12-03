@@ -1,44 +1,42 @@
 # Grid Combat Environment - Architecture Map
 
-A short guide for new contributors; focus on where to start and how data flows.
+Short orientation for contributors: what lives where and how a turn flows.
 
 ## Top-Level Pieces
 - `env/`: Simulation engine (core types, entities, mechanics, `Scenario`, `GridCombatEnv`).
-- `agents/`: Built-in agent implementations plus the factory used by scenarios.
-- `runtime/frame.py`: Lightweight turn snapshot (`Frame`) with serialization helpers for the UI.
-- `runtime/runner.py`: Orchestrates a game. Loads a `Scenario`, wires up agents, steps the `GridCombatEnv`, and emits `Frame` objects.
-- `infra/paths.py`: Shared filesystem locations (project root, storage, UI entrypoint) used by env and API layers.
-- `api/app.py`: FastAPI surface for the runner. Minimal stateful wrapper that exposes `/start`, `/step`, and `/status`.
-- `ui/ops_deck.html`: Static control panel that calls the API to drive and visualize a match.
+- `agents/`: Agent base class, registry/factory, built-ins (random, greedy). Registry auto-discovers agent modules on first use.
+- `runtime/frame.py`: Turn snapshot with serialization for UI/API.
+- `runtime/runner.py`: Orchestrates a game; wires `Scenario` + agents into `GridCombatEnv` and emits `Frame`s.
+- `infra/`: Shared paths (`infra/paths.py`) and logging setup (`infra/logger.py`).
+- `api/app.py`: FastAPI surface exposing `/start`, `/step`, `/status`.
+- `ui/ops_deck.html`: Static control panel that calls the API and renders frames.
+- `main.py`: Local launcher that configures logging and runs API + UI together.
 
-## How a Turn Moves Through the System
-1. A client posts a scenario (and optional saved `world`) to `POST /start`. `api/app.py` builds a `Scenario` and instantiates a global `GameRunner`.
-2. Each `POST /step` call forwards optional agent injections, asks the runner to advance one turn, and returns a serialized `Frame` (world snapshot + actions + observations).
-3. The UI (`ui/ops_deck.html`) polls `/status` to show progress and hits `/step` to advance the game. It renders directly from the `Frame` payload.
+## How a Turn Moves
+1. Client posts a scenario (and optional saved `world`) to `POST /start`; API builds a `Scenario` and a global `GameRunner`.
+2. `POST /step` asks the runner to advance one turn; runner gathers actions from each agent, calls `env.step()`, and returns a serialized `Frame` (pre-step world + observations + action metadata).
+3. UI polls `/status` and calls `/step` to drive the match, rendering directly from the `Frame` payload.
 
-## Game Runner at a Glance
-- Entry point for the simulation layer (`runtime/runner.py`).
-- Holds a `GridCombatEnv` instance and two prepared agents derived from the scenario.
-- `step()` merges both teams' actions, calls `env.step()`, and returns the pre-step world as a `Frame` so the UI can show fog-of-war correct views.
-- `run()` is a convenience loop for full episodes; `get_final_frame()` returns the terminal state without actions.
+## Runner in Brief (`runtime/runner.py`)
+- Holds a `GridCombatEnv` plus prepared agents from `scenario.agents`.
+- `step()`: clone world with fresh observations → ask agents for actions → call `env.step()` → stash terminal world when done → return a `Frame` of the pre-step world.
+- `run()` loops until done; `get_final_frame()` returns the terminal world without actions.
 
-## API Surface
-- `POST /start`: body `{ "scenario": {...}, "world": {...}|null }` — creates the runner.
-- `POST /step`: body `{ "injections": {...}|null }` — advances one turn, returns `Frame`.
-- `GET /status`: quick heartbeat (`active`, `turn`, `step`, `done`).
-- Dev command: `uv run uvicorn api.app:app --reload --port 8000`.
+## Core Engine Notes (`env/`)
+- `GridCombatEnv`: turn sequencing: tick cooldowns → movement → sensors → combat → victory checks → return `(state, rewards, done, StepInfo)`.
+- `Scenario`: single source of truth for grid size, rules, entities, seed, and agent specs; `from_dict`/`to_dict` support API use.
+- `WorldState`: mutable game state; `SensorSystem.refresh_all_observations()` keeps fog-of-war in sync on snapshots.
+- Mechanics are stateless modules under `env/mechanics`; entities live under `env/entities`; foundational types under `env/core`; spatial structures under `env/world`.
 
-## UI Touchpoints
-- Open `ui/ops_deck.html` in a browser; it expects the API above to be running locally on port 8000.
-- Renders from the `Frame` fields: `world` (canonical state), `entities` (UI-friendly shape), `observations` (fog-of-war per team), and optional `actions/step_info`.
+## Agents
+- Register via `@register_agent("key")` inside `agents/<your_agent>.py`; registry auto-discovers modules.
+- `AgentSpec` in scenarios names the agent (`type` key or full import path) and init params; factory resolves and instantiates via the registry.
 
-## Core Engine Notes
-- `GridCombatEnv` (in `env/environment.py`) owns turn sequencing: movement → sensing → combat → victory checks.
-- `Scenario` objects (in `env/scenario.py`) are the single source of truth for grid size, rules, entities, seeds, and agent specs.
-- `WorldState` holds mutable game state; cloning plus `SensorSystem.refresh_all_observations()` is used when preparing UI-ready snapshots to avoid stale visibility data.
+## API Surface (FastAPI)
+- `POST /start`: `{ "scenario": {...}, "world": {...}|null }` → create runner.
+- `POST /step`: `{ "injections": {...}|null }` → advance one turn, return `Frame`.
+- `GET /status`: heartbeat (`active`, `turn`, `step`, `done`).
 
-## Engine Internals (env/)
-- Flow inside `GridCombatEnv.step()`: tick cooldowns → movement resolver → sensor refresh → combat resolver → victory checks → return `(state, rewards, done, info)`.
-- Key subsystems: `world/` (grid + world state), `core/` (types, actions), `entities/` (unit capabilities), `mechanics/` (movement/sensors/combat/victory, all stateless).
-- `Scenario` builds everything up front; env takes the scenario dict and initializes `WorldState` plus rules with no hidden defaults.
-- Observations are stored per-team on `WorldState`; always call the sensor system after movement to keep fog-of-war aligned with positions.
+## Logging & Paths
+- Logging configured once in `main.py` via `infra.logger.configure_logging()`; per-module loggers via `get_logger(__name__)` log to console + `storage/logs/backend.log`.
+- Common paths (project root, storage, UI entrypoint) live in `infra/paths.py`.
