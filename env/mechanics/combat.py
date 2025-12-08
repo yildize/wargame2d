@@ -54,7 +54,7 @@ def hit_probability(
         >>> hit_probability(distance=10.0, max_range=10.0, base=0.8, min_p=0.1)
         0.1
         >>> hit_probability(distance=15.0, max_range=10.0, base=0.8, min_p=0.1)
-        0.1
+        0.0
     """
 
     # Validate inputs
@@ -69,8 +69,8 @@ def hit_probability(
     if min_p > base:
         raise ValueError(f"Min probability ({min_p}) cannot exceed base ({base})")
 
-    # Linear interpolation: base at 0, min_p at max_range
-    if distance >= max_range:
+    # Linear interpolation: base at 0, min_p at max_range (inclusive)
+    if distance > max_range:
         return 0.0
 
     frac = max(0.0, min(1.0, distance / max_range))

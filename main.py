@@ -9,6 +9,7 @@ import uvicorn
 from infra.logger import STORAGE_DIR, configure_logging, get_logger
 
 
+
 def _open_browser(url: str, delay: float = 1.0) -> None:
     """Open the UI in the default browser after the server spins up."""
     timer = threading.Timer(delay, lambda: webbrowser.open(url))

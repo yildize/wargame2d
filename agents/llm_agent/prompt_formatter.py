@@ -37,7 +37,7 @@ def _default_enemy_profiles() -> Dict[EntityKind, WeaponProfile]:
         EntityKind.SAM: WeaponProfile(max_range=6.0, base_hit_prob=0.8, min_hit_prob=0.1),
         EntityKind.AWACS: WeaponProfile(max_range=0.0, base_hit_prob=0.0, min_hit_prob=0.0),
         EntityKind.DECOY: WeaponProfile(max_range=0.0, base_hit_prob=0.0, min_hit_prob=0.0),
-        EntityKind.UNKNOWN: WeaponProfile(max_range=3.0, base_hit_prob=0.6, min_hit_prob=0.1),
+        EntityKind.UNKNOWN: WeaponProfile(max_range=3.0, base_hit_prob=0.8, min_hit_prob=0.1),
     }
 
 
@@ -56,9 +56,10 @@ class PromptConfig:
     """
 
     nearby_ally_radius: float = 5.0
-    nearby_enemy_radius: float = 8.0
-    grouping_radius: float = 2.5
+    nearby_enemy_radius: float = 6.0
+    grouping_radius: float = 3.0
     threat_close_radius: float = 3.0
+    threat_approach_buffer: float = 2.0  # How far outside enemy max range counts as "almost in range"
     include_hit_probabilities: bool = True
     include_casualties: bool = True
     enemy_weapon_profiles: Dict[EntityKind, WeaponProfile] = field(default_factory=_default_enemy_profiles)
@@ -80,7 +81,7 @@ class PromptFormatter:
         config: Optional[PromptConfig] = None,
         turn_number: int = 0,
         team_name: Optional[str] = None,
-    ) -> Tuple[str, Dict[str, Any]]:
+    ) -> Dict[str, Any]:
         """
         Build the JSON prompt and return both the string and the underlying dict.
         """
@@ -88,9 +89,13 @@ class PromptFormatter:
         friendly_positions = [e.pos for e in intel.friendlies if e.alive]
         enemy_positions = [e.position for e in intel.visible_enemies]
 
+        situation = self._build_situation(intel, friendly_positions, enemy_positions, cfg)
+        # Add far-away enemies not covered by per-unit threat listings.
+        situation["distant_enemies"] = self._get_distant_enemies(intel, friendly_positions, cfg)
+
         payload: Dict[str, Any] = {
             "metadata": self._build_metadata(intel, turn_number, team_name),
-            "situation": self._build_situation(intel, friendly_positions, enemy_positions, cfg),
+            "situation": situation,
             "units": [],
         }
 
@@ -112,8 +117,38 @@ class PromptFormatter:
                 )
             )
 
-        json_string = json.dumps(payload, indent=2)
-        return json_string, payload
+        return payload
+
+    def _get_distant_enemies(
+        self,
+        intel: TeamIntel,
+        friendly_positions: List[Tuple[int, int]],
+        cfg: PromptConfig,
+    ) -> List[Dict[str, Any]]:
+        """
+        List visible enemies that are outside the nearby enemy radius of all friendlies.
+        Provides minimal info so they are not omitted from the prompt entirely.
+        """
+        distant: List[Dict[str, Any]] = []
+        for enemy in intel.visible_enemies:
+            if not friendly_positions:
+                min_dist = None
+            else:
+                min_dist = min(intel.grid.distance(pos, enemy.position) for pos in friendly_positions)
+            if min_dist is not None and min_dist <= cfg.nearby_enemy_radius:
+                continue  # Already covered by at least one unit's threat listing
+            distant.append(
+                {
+                    "enemy_id": enemy.id,
+                    "type": enemy.kind.name if hasattr(enemy.kind, "name") else str(enemy.kind),
+                    "team": enemy.team.name if hasattr(enemy.team, "name") else str(enemy.team),
+                    "position": {"x": enemy.position[0], "y": enemy.position[1]},
+                    "nearest_friendly_distance": round(min_dist, 1) if isinstance(min_dist, (int, float)) else None,
+                    "current_threat": "OUT_OF_RANGE",
+                    "notes": "Outside all nearby threat radii; poses no immediate risk",
+                }
+            )
+        return distant
 
     # ------------------------------------------------------------------ #
     # Metadata + situation
@@ -126,8 +161,9 @@ class PromptFormatter:
                 "width": intel.grid.width,
                 "height": intel.grid.height,
                 "center": {
-                    "x": intel.grid.width / 2,
-                    "y": intel.grid.height / 2,
+                    # Use integer cell coordinates; for even sizes this picks the lower/left center cell.
+                    "x": intel.grid.width // 2,
+                    "y": intel.grid.height // 2,
                 },
             },
             "coordinate_system": {
@@ -153,9 +189,20 @@ class PromptFormatter:
     ) -> Dict[str, Any]:
         ally_center = self._calculate_center_of_mass(friendly_positions)
         enemy_center = self._calculate_center_of_mass(enemy_positions)
-        formation_separation = (
+        formation_center_distance = (
             self._euclidean_distance(ally_center, enemy_center) if ally_center and enemy_center else None
         )
+        enemy_center_relative_to_allies = None
+        if ally_center and enemy_center:
+            dx = enemy_center["x"] - ally_center["x"]
+            dy = enemy_center["y"] - ally_center["y"]
+            enemy_center_relative_to_allies = {
+                "relative_to": "ally_center_of_mass",
+                "dx": dx,
+                "dy": dy,
+                "distance": formation_center_distance,
+                "direction": self._get_cardinal_direction(dx, dy),
+            }
 
         friendly_losses = self._summarize_losses(intel.friendlies)
 
@@ -174,7 +221,8 @@ class PromptFormatter:
             "spatial_analysis": {
                 "ally_center_of_mass": ally_center,
                 "enemy_center_of_mass": enemy_center,
-                "formation_separation": formation_separation,
+                "enemy_center_relative_to_allies": enemy_center_relative_to_allies,
+                "formation_center_distance": formation_center_distance,
                 "ally_formation_spread": self._formation_spread(friendly_positions, ally_center),
                 "enemy_formation_spread": self._formation_spread(enemy_positions, enemy_center),
             },
@@ -208,18 +256,27 @@ class PromptFormatter:
             "threats": threats,
             "actions": self._get_actions(entity, allowed_actions, intel, cfg),
         }
-
-        unit_data["tactical_assessment"] = self._assess_unit_situation(threats, nearby_allies)
         return unit_data
 
     def _get_capabilities(self, entity: Entity) -> Dict[str, Any]:
-        return {
+        capabilities: Dict[str, Any] = {
             "can_move": entity.can_move,
             "can_shoot": entity.can_shoot,
-            "missiles_remaining": getattr(entity, "missiles", None),
-            "weapon_max_range": getattr(entity, "missile_max_range", None),
-            "radar_range": getattr(entity, "get_active_radar_range", lambda: None)(),
         }
+
+        if self._is_armed(entity):
+            missiles = getattr(entity, "missiles", None)
+            weapon_range = getattr(entity, "missile_max_range", None)
+            if missiles is not None:
+                capabilities["missiles_remaining"] = missiles
+            if weapon_range is not None:
+                capabilities["weapon_max_range"] = weapon_range
+
+        radar_range = getattr(entity, "get_active_radar_range", lambda: None)()
+        if radar_range is not None:
+            capabilities["radar_range"] = radar_range
+
+        return capabilities
 
     def _get_nearby_allies(
         self,
@@ -271,8 +328,10 @@ class PromptFormatter:
             dy = enemy.position[1] - entity.pos[1]
 
             our_engagement = self._our_engagement(entity, enemy, intel, distance, cfg)
-            their_engagement, threat_type = self._their_engagement(enemy, distance, cfg)
-
+            their_engagement, threat_type, risk_level, safety_margin = self._their_engagement(
+                enemy, distance, cfg
+            )
+            is_shooter = self._enemy_can_shoot(enemy)
             detected.append(
                 {
                     "enemy_id": enemy.id,
@@ -287,13 +346,17 @@ class PromptFormatter:
                         "direction": self._get_cardinal_direction(dx, dy),
                     },
                     "has_fired_before": enemy.has_fired_before,
-                    "is_shooter": enemy.has_fired_before,
+                    "is_shooter": is_shooter,
                     "grouped_with": grouped_map.get(enemy.id, []),
                     "threat_type": threat_type,
-                    "our_engagement": our_engagement,
-                    "their_engagement": their_engagement,
+                    "risk_level": risk_level,
+                    "safety_distance_margin": safety_margin,
                 }
             )
+            if our_engagement is not None:
+                detected[-1]["our_engagement"] = our_engagement
+            if their_engagement is not None:
+                detected[-1]["their_engagement"] = their_engagement
 
         detected.sort(key=lambda t: t["relative_position"]["distance"])
 
@@ -311,14 +374,19 @@ class PromptFormatter:
         intel: TeamIntel,
         distance: float,
         cfg: PromptConfig,
-    ) -> Dict[str, Any]:
+    ) -> Optional[Dict[str, Any]]:
+        # Skip engagement details if the unit cannot shoot or has no missiles left.
+        missiles = getattr(entity, "missiles", None)
+        if not entity.can_shoot or (missiles is not None and missiles <= 0):
+            return None
+
         max_range = getattr(entity, "missile_max_range", None)
         in_range = max_range is not None and distance <= max_range
         hit_prob = None
         if cfg.include_hit_probabilities and in_range:
             hit_prob = intel.estimate_hit_probability(entity, enemy)
         return {
-            "we_can_shoot": bool(entity.can_shoot and getattr(entity, "missiles", 0) > 0),
+            "we_can_shoot": True,
             "in_our_range": in_range,
             "our_hit_probability": round(hit_prob, 3) if isinstance(hit_prob, float) else None,
             "out_of_our_range_by": round(distance - max_range, 1) if max_range and not in_range else None,
@@ -329,24 +397,36 @@ class PromptFormatter:
         enemy: VisibleEnemy,
         distance: float,
         cfg: PromptConfig,
-    ) -> Tuple[Dict[str, Any], Optional[str]]:
+    ) -> Tuple[Optional[Dict[str, Any]], Optional[str], Optional[str], Optional[float]]:
         profile = cfg.enemy_weapon_profiles.get(enemy.kind, cfg.fallback_enemy_weapon_profile)
+        if profile.max_range <= 0:
+            return None, "UNARMED", "SAFE", None
+
         we_are_in_range = distance <= profile.max_range and profile.max_range > 0
         estimated = None
-        if cfg.include_hit_probabilities and we_are_in_range:
-            estimated = hit_probability(
-                distance=distance,
-                max_range=profile.max_range,
-                base=profile.base_hit_prob,
-                min_p=profile.min_hit_prob,
-            )
-        threat_type = None
-        if we_are_in_range and distance <= cfg.threat_close_radius:
-            threat_type = "ARMED_AND_CLOSE"
-        elif we_are_in_range:
+        if cfg.include_hit_probabilities:
+            if we_are_in_range:
+                estimated = hit_probability(
+                    distance=distance,
+                    max_range=profile.max_range,
+                    base=profile.base_hit_prob,
+                    min_p=profile.min_hit_prob,
+                )
+            else:
+                estimated = 0.0  # Out of range, so effective hit probability is zero
+        # Classify threat level using distance to assumed max range.
+        danger_range = profile.max_range
+        caution_range = profile.max_range + cfg.threat_approach_buffer
+        safety_margin = round(max(distance - danger_range, 0), 1)
+        if distance <= danger_range:
             threat_type = "ARMED_IN_RANGE"
-        elif profile.max_range > 0:
+            risk_level = "DANGER"
+        elif distance <= caution_range:
+            threat_type = "ARMED_ALMOST_IN_RANGE"
+            risk_level = "CAUTION"
+        else:
             threat_type = "ARMED_OUT_OF_RANGE"
+            risk_level = "SAFE"
 
         return (
             {
@@ -355,6 +435,8 @@ class PromptFormatter:
                 "estimated_their_hit_probability": round(estimated, 2) if isinstance(estimated, float) else None,
             },
             threat_type,
+            risk_level,
+            safety_margin,
         )
 
     def _get_actions(
@@ -364,49 +446,23 @@ class PromptFormatter:
         intel: TeamIntel,
         cfg: PromptConfig,
     ) -> List[Dict[str, Any]]:
-        action_list: List[Dict[str, Any]] = []
+        formatted: List[Dict[str, Any]] = []
         for action in actions:
-            data: Dict[str, Any] = {"type": action.type.name, "parameters": action.to_dict()["params"]}
-            if action.type == ActionType.SHOOT:
-                target_id = action.params.get("target_id")
-                target = intel.get_enemy(target_id)
-                if target:
-                    distance = intel.grid.distance(entity.pos, target.position)
-                    dx = target.position[0] - entity.pos[0]
-                    dy = target.position[1] - entity.pos[1]
-                    data["target"] = {
-                        "enemy_id": target_id,
-                        "type": target.kind.name if hasattr(target.kind, "name") else str(target.kind),
-                        "position": {"x": target.position[0], "y": target.position[1]},
-                        "relative_position": {"dx": dx, "dy": dy, "distance": round(distance, 1), "direction": self._get_cardinal_direction(dx, dy)},
-                    }
-                    if cfg.include_hit_probabilities:
-                        hit_prob = intel.estimate_hit_probability(entity, target)
-                        data["hit_probability"] = round(hit_prob, 3) if isinstance(hit_prob, float) else None
-            elif action.type == ActionType.MOVE:
-                direction: MoveDir = action.params.get("dir")  # type: ignore[assignment]
-                data["direction"] = direction.name if isinstance(direction, MoveDir) else direction
-                new_pos = self._calculate_new_position(entity.pos, direction)
-                data["destination"] = {"x": new_pos[0], "y": new_pos[1]}
-            action_list.append(data)
-        return action_list
+            entry: Dict[str, Any] = {"type": action.type.name, "entity_id": entity.id}
 
-    def _assess_unit_situation(
-        self,
-        threats: Dict[str, Any],
-        nearby_allies: List[Dict[str, Any]],
-    ) -> Dict[str, Any]:
-        detected = threats.get("detected_enemies", [])
-        immediate = [
-            t
-            for t in detected
-            if t.get("threat_type") in ("ARMED_AND_CLOSE",) or (t.get("their_engagement", {}).get("we_are_in_their_range") and t["relative_position"]["distance"] <= threats.get("grouping_radius", 0))
-        ]
-        return {
-            "nearby_threat_count": len(detected),
-            "nearby_ally_count": len(nearby_allies),
-            "threat_status": "DANGER" if immediate else ("CAUTION" if detected else "SAFE"),
-        }
+            if action.type == ActionType.MOVE:
+                direction: MoveDir = action.params.get("dir")  # type: ignore[assignment]
+                entry["direction"] = direction.name if isinstance(direction, MoveDir) else direction
+            elif action.type == ActionType.SHOOT:
+                target_id = action.params.get("target_id")
+                entry["target_id"] = target_id
+            elif action.type == ActionType.TOGGLE:
+                entry["on"] = action.params.get("on")
+            # WAIT has no extra fields
+
+            formatted.append(entry)
+
+        return formatted
 
     # ------------------------------------------------------------------ #
     # Casualties + helpers
@@ -442,7 +498,8 @@ class PromptFormatter:
             return None
         avg_x = sum(pos[0] for pos in positions) / len(positions)
         avg_y = sum(pos[1] for pos in positions) / len(positions)
-        return {"x": round(avg_x, 1), "y": round(avg_y, 1)}
+        # Round to nearest grid cell for simpler consumption in prompts.
+        return {"x": int(round(avg_x)), "y": int(round(avg_y))}
 
     def _formation_spread(
         self,
@@ -488,6 +545,20 @@ class PromptFormatter:
                     grouped.setdefault(enemy.id, []).append(other.id)
                     grouped.setdefault(other.id, []).append(enemy.id)
         return grouped
+
+    def _enemy_can_shoot(self, enemy: VisibleEnemy) -> Optional[bool]:
+        """
+        Infer enemy shooting capability from its known kind.
+
+        We only use publicly observable type information; unknown types stay None.
+        """
+        can_shoot_by_kind = {
+            EntityKind.AIRCRAFT: True,
+            EntityKind.SAM: True,
+            EntityKind.AWACS: False,
+            EntityKind.DECOY: False,
+        }
+        return can_shoot_by_kind.get(enemy.kind)
 
     def _calculate_new_position(self, current_pos: Tuple[int, int], direction: Any) -> Tuple[int, int]:
         if isinstance(direction, MoveDir):

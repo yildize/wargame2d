@@ -10,12 +10,14 @@ from typing import Dict, List, Any, Optional, TYPE_CHECKING
 import json
 import time
 
+from infra.logger import get_logger
 from infra.paths import PROJECT_ROOT, SCENARIO_STORAGE_DIR
 from .entities.base import Entity
 from .entities import Aircraft, AWACS, SAM, Decoy
 from .core.types import Team
 from agents import AgentSpec
 
+logger = get_logger(__name__)
 
 
 class Scenario:
@@ -254,6 +256,7 @@ class Scenario:
                 filepath = PROJECT_ROOT / filepath
             filepath.parent.mkdir(parents=True, exist_ok=True)
 
+        logger.info("Saving scenario JSON to %s", filepath)
         with open(filepath, 'w') as f:
             json.dump(self.to_json_dict(), f, indent=indent, ensure_ascii=False)
     
@@ -366,3 +369,11 @@ def create_mixed_scenario() -> Scenario:
             )
         ]
     )
+
+if __name__ == "__main__":
+    # Can be run via uv run python -m env.scenario
+    # Configure logging (otherwise logger won't work since main.py is not run)
+    from infra.logger import configure_logging
+    configure_logging(level="INFO", json=True)
+    scenario = create_mixed_scenario()
+    scenario.save_json()
