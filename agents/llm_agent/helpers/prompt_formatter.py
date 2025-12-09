@@ -18,7 +18,7 @@ from env.core.actions import Action
 from env.core.types import ActionType, EntityKind, MoveDir
 from env.entities.base import Entity
 from env.mechanics.combat import hit_probability
-from ..team_intel import TeamIntel, VisibleEnemy
+from agents.team_intel import TeamIntel, VisibleEnemy
 
 
 @dataclass

@@ -9,7 +9,7 @@ from typing import Dict, Any, Optional, TYPE_CHECKING
 from env.core.actions import Action
 from env.core.types import Team, ActionType, MoveDir
 from env.world import WorldState
-from .agent_details import (
+from .actors.executer import (
     player,
     MoveAction,
     ShootAction,
@@ -20,7 +20,7 @@ from .agent_details import (
 from ..base_agent import BaseAgent
 from ..team_intel import TeamIntel
 from ..registry import register_agent
-from .prompt_formatter import PromptFormatter, PromptConfig
+from agents.llm_agent.helpers.prompt_formatter import PromptFormatter, PromptConfig
 
 if TYPE_CHECKING:
     from env.environment import StepInfo

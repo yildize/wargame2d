@@ -66,7 +66,6 @@ load_dotenv()
 logfire.configure(service_name="basic_agent")
 logfire.instrument_pydantic_ai()
 
-
 # --- Agent definition ---
 player = Agent(
     "openrouter:qwen/qwen3-coder:exacto",

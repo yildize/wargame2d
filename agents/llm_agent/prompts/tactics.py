@@ -1,0 +1,85 @@
+TACTICAL_GUIDE = f"""
+### TACTICAL GUIDE FOR 2D COMBAT GRID GAME
+
+## VICTORY CONDITION
+Destroy enemy AWACS while protecting yours. Time costs resources - aggressive progress required.
+
+## CORE PRINCIPLES
+
+### 1. AWACS PROTECTION (TOP PRIORITY)
+- Keep AWACS at maximum rear distance with clear escape routes
+- Maintain 2+ unblocked retreat paths at all times
+- Position multiple defensive layers between AWACS and threats
+- Never expose AWACS unless victory is guaranteed
+
+### 2. INFORMATION WARFARE
+- Radar detection is SHARED across team - maximize coverage, minimize overlap
+- Position units to cover maximum grid area (redundant detection wastes positioning)
+- Use decoys to probe unknown areas and reveal enemy SAM positions
+- Push radar forward for early warning of enemy advances
+
+### 3. TARGET PRIORITY
+1. Enemy AWACS (if accessible - game-winning)
+2. Enemy aircraft threatening your AWACS
+3. Enemy SAMs blocking your advance path
+4. Enemy decoys (LOWEST - avoid wasting ammunition)
+
+### 4. AMMUNITION ECONOMY
+- Fire at closer range for higher hit probability
+- Coordinate multi-unit strikes on tough targets (avoid overkill)
+- Don't waste missiles on suspected decoys
+- Each shot counts - make them matter
+
+### 5. SAM TACTICS
+- **Stealth Positioning:** Keep SAMs OFF until optimal moment
+- **Ambush Pattern:** Toggle ON → Shoot → Toggle OFF immediately
+- **Cooldown Safety:** Stay stealthed during ~5-turn reload period
+- **Surprise > Sustained Fire:** One good ambush shot beats continuous exposure
+
+### 6. DECOY OPERATIONS
+- Mix decoys with real aircraft to create targeting uncertainty
+- Use decoys to bait enemy SAMs into revealing positions
+- Send decoys ahead to absorb fire and clear paths
+- Enemy can't distinguish decoys - exploit this
+
+### 7. FORMATION CONCEPTS
+**Defense:** Layered screen with aircraft forward, AWACS back, hidden SAMs for surprise
+**Offense:** Decoys on flanks, real aircraft concentrated, probe multiple corridors
+**Never:** Cluster all units together (wastes radar coverage + vulnerable to focus fire)
+
+### 8. TEMPO & AGGRESSION
+- Static defense loses to operational costs over time
+- Apply pressure to force enemy into reactive positions
+- Trading 1 aircraft for enemy AWACS = victory
+- Once enemy weakened, commit to AWACS strike
+
+### 9. COMMON MISTAKES TO AVOID
+- Overlapping radar coverage (shared detection makes this wasteful)
+- Shooting at maximum range (low hit % wastes precious ammo)
+- Single escape route for AWACS (death trap)
+- Keeping SAMs constantly ON (makes them easy targets)
+- Engaging obvious decoys (ammo waste)
+- All units in one corridor (easily blocked/countered)
+
+### 10. WINNING PATTERNS
+- **SAM Ambush:** Hide SAM → Enemy enters range → Toggle ON + Shoot → Toggle OFF
+- **Decoy Screen:** Decoys lead, aircraft follow 2-3 cells back, exploit cleared path
+- **Pincer Movement:** Attack from multiple directions to trap enemy AWACS
+- **Breakthrough Timing:** Thin enemy defenses first, then commit to AWACS kill
+
+## DECISION FRAMEWORK EACH TURN
+1. Is my AWACS safe? (If no - prioritize defense immediately)
+2. Can I damage/kill enemy AWACS? (If yes - consider aggressive strike)
+3. What new enemy positions revealed? (Update threat assessment)
+4. Which units can contribute to objective? (Advance those, position others)
+5. Are SAMs optimally positioned for ambush? (Toggle timing critical)
+6. Is ammunition being used efficiently? (High-value targets only)
+
+## REMEMBER
+- Every turn costs resources - make progress toward enemy AWACS
+- Shared radar = spread units for coverage, don't cluster
+- Decoys are disposable intelligence assets - use them
+- SAMs are ambush weapons, not frontline fighters
+- Close distance before shooting when safe to do so
+- Protect AWACS > Everything else
+"""
