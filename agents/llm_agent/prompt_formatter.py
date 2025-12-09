@@ -88,6 +88,7 @@ class PromptFormatter:
         cfg = config or PromptConfig()
         friendly_positions = [e.pos for e in intel.friendlies if e.alive]
         enemy_positions = [e.position for e in intel.visible_enemies]
+        move_conflicts = self._collect_move_conflicts(allowed_actions, intel)
 
         situation = self._build_situation(intel, friendly_positions, enemy_positions, cfg)
         # Add far-away enemies not covered by per-unit threat listings.
@@ -114,6 +115,7 @@ class PromptFormatter:
                     allowed_actions=allowed_actions.get(entity.id, []),
                     cfg=cfg,
                     grouped_map=grouped_map,
+                    move_conflicts=move_conflicts,
                 )
             )
 
@@ -189,9 +191,11 @@ class PromptFormatter:
     ) -> Dict[str, Any]:
         ally_center = self._calculate_center_of_mass(friendly_positions)
         enemy_center = self._calculate_center_of_mass(enemy_positions)
-        formation_center_distance = (
-            self._euclidean_distance(ally_center, enemy_center) if ally_center and enemy_center else None
-        )
+        formation_center_distance = None
+        if ally_center and enemy_center:
+            ally_pos = (ally_center["x"], ally_center["y"])
+            enemy_pos = (enemy_center["x"], enemy_center["y"])
+            formation_center_distance = round(intel.grid.distance(ally_pos, enemy_pos), 1)
         enemy_center_relative_to_allies = None
         if ally_center and enemy_center:
             dx = enemy_center["x"] - ally_center["x"]
@@ -223,8 +227,8 @@ class PromptFormatter:
                 "enemy_center_of_mass": enemy_center,
                 "enemy_center_relative_to_allies": enemy_center_relative_to_allies,
                 "formation_center_distance": formation_center_distance,
-                "ally_formation_spread": self._formation_spread(friendly_positions, ally_center),
-                "enemy_formation_spread": self._formation_spread(enemy_positions, enemy_center),
+                "ally_formation_spread": self._formation_spread(friendly_positions, ally_center, intel.grid),
+                "enemy_formation_spread": self._formation_spread(enemy_positions, enemy_center, intel.grid),
             },
         }
 
@@ -239,6 +243,7 @@ class PromptFormatter:
         allowed_actions: List[Action],
         cfg: PromptConfig,
         grouped_map: Dict[int, List[int]],
+        move_conflicts: Dict[Tuple[int, int], List[int]],
     ) -> Dict[str, Any]:
         threats = self._get_threats(entity, intel, cfg, grouped_map)
         nearby_allies = self._get_nearby_allies(entity, intel, cfg)
@@ -254,7 +259,7 @@ class PromptFormatter:
                 "allies": nearby_allies,
             },
             "threats": threats,
-            "actions": self._get_actions(entity, allowed_actions, intel, cfg),
+            "actions": self._get_actions(entity, allowed_actions, intel, cfg, move_conflicts),
         }
         return unit_data
 
@@ -331,7 +336,7 @@ class PromptFormatter:
             their_engagement, threat_type, risk_level, safety_margin = self._their_engagement(
                 enemy, distance, cfg
             )
-            is_shooter = self._enemy_can_shoot(enemy)
+            is_shooter = self._enemy_can_shoot(enemy, cfg)
             detected.append(
                 {
                     "enemy_id": enemy.id,
@@ -398,7 +403,7 @@ class PromptFormatter:
         distance: float,
         cfg: PromptConfig,
     ) -> Tuple[Optional[Dict[str, Any]], Optional[str], Optional[str], Optional[float]]:
-        profile = cfg.enemy_weapon_profiles.get(enemy.kind, cfg.fallback_enemy_weapon_profile)
+        profile = self._get_enemy_profile(enemy.kind, cfg)
         if profile.max_range <= 0:
             return None, "UNARMED", "SAFE", None
 
@@ -445,6 +450,7 @@ class PromptFormatter:
         actions: List[Action],
         intel: TeamIntel,
         cfg: PromptConfig,
+        move_conflicts: Dict[Tuple[int, int], List[int]],
     ) -> List[Dict[str, Any]]:
         formatted: List[Dict[str, Any]] = []
         for action in actions:
@@ -453,6 +459,11 @@ class PromptFormatter:
             if action.type == ActionType.MOVE:
                 direction: MoveDir = action.params.get("dir")  # type: ignore[assignment]
                 entry["direction"] = direction.name if isinstance(direction, MoveDir) else direction
+                destination = self._calculate_new_position(entity.pos, direction)
+                entry["destination"] = {"x": destination[0], "y": destination[1]}
+                blockage = self._describe_move_blockage(entity, destination, intel, move_conflicts)
+                if blockage:
+                    entry["blockage"] = blockage
             elif action.type == ActionType.SHOOT:
                 target_id = action.params.get("target_id")
                 entry["target_id"] = target_id
@@ -505,20 +516,15 @@ class PromptFormatter:
         self,
         positions: List[Tuple[int, int]],
         center: Optional[Dict[str, float]],
+        grid,
     ) -> Optional[float]:
         if not positions or not center:
             return None
-        distances = [((pos[0] - center["x"]) ** 2 + (pos[1] - center["y"]) ** 2) ** 0.5 for pos in positions]
+        center_pos = (center["x"], center["y"])
+        distances = [grid.distance(pos, center_pos) for pos in positions]
         if not distances:
             return None
         return round(sum(distances) / len(distances), 1)
-
-    def _euclidean_distance(self, pos1: Optional[Dict[str, float]], pos2: Optional[Dict[str, float]]) -> Optional[float]:
-        if not pos1 or not pos2:
-            return None
-        dx = pos1["x"] - pos2["x"]
-        dy = pos1["y"] - pos2["y"]
-        return round((dx ** 2 + dy ** 2) ** 0.5, 1)
 
     def _get_cardinal_direction(self, dx: float, dy: float) -> str:
         if abs(dx) < 0.5 and abs(dy) < 0.5:
@@ -546,19 +552,42 @@ class PromptFormatter:
                     grouped.setdefault(other.id, []).append(enemy.id)
         return grouped
 
-    def _enemy_can_shoot(self, enemy: VisibleEnemy) -> Optional[bool]:
+    def _get_enemy_profile(self, kind: EntityKind, cfg: PromptConfig) -> WeaponProfile:
         """
-        Infer enemy shooting capability from its known kind.
+        Fetch the assumed weapon profile for an enemy kind using the configured map.
+        """
+        return cfg.enemy_weapon_profiles.get(kind, cfg.fallback_enemy_weapon_profile)
 
-        We only use publicly observable type information; unknown types stay None.
+    def _collect_move_conflicts(
+        self,
+        allowed_actions: Dict[int, List[Action]],
+        intel: TeamIntel,
+    ) -> Dict[Tuple[int, int], List[int]]:
         """
-        can_shoot_by_kind = {
-            EntityKind.AIRCRAFT: True,
-            EntityKind.SAM: True,
-            EntityKind.AWACS: False,
-            EntityKind.DECOY: False,
-        }
-        return can_shoot_by_kind.get(enemy.kind)
+        Build a map of destination -> list[entity_id] for all ally MOVE actions.
+
+        This lets us warn the LLM about multiple friendlies aiming for the same cell.
+        """
+        conflicts: Dict[Tuple[int, int], List[int]] = {}
+        for entity_id, actions in allowed_actions.items():
+            friendly = intel.get_friendly(entity_id)
+            if friendly is None or not friendly.alive:
+                continue
+            for action in actions:
+                if action.type != ActionType.MOVE:
+                    continue
+                direction: MoveDir = action.params.get("dir")  # type: ignore[assignment]
+                dest = self._calculate_new_position(friendly.pos, direction)
+                conflicts.setdefault(dest, []).append(entity_id)
+        return conflicts
+
+    def _enemy_can_shoot(self, enemy: VisibleEnemy, cfg: PromptConfig) -> bool:
+        """
+        Infer enemy shooting capability from the assumed weapon profile.
+        """
+        # A positive weapon range in the assumed profile is treated as "armed".
+        profile = self._get_enemy_profile(enemy.kind, cfg)
+        return profile.max_range > 0
 
     def _calculate_new_position(self, current_pos: Tuple[int, int], direction: Any) -> Tuple[int, int]:
         if isinstance(direction, MoveDir):
@@ -570,3 +599,65 @@ class PromptFormatter:
 
     def _is_armed(self, entity: Entity) -> bool:
         return bool(getattr(entity, "missiles", 0)) or entity.can_shoot
+
+    def _describe_move_blockage(
+        self,
+        mover: Entity,
+        destination: Tuple[int, int],
+        intel: TeamIntel,
+        move_conflicts: Dict[Tuple[int, int], List[int]],
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Explain whether a move is blocked or risky based on known occupancy and
+        other allies targeting the same cell.
+        """
+        occupant_friendly: Optional[Entity] = None
+        occupant_enemy: Optional[VisibleEnemy] = None
+
+        occupied = intel.is_occupied(destination, ignore_ids={mover.id})
+        if occupied:
+            for friendly in intel.friendlies:
+                if friendly.id == mover.id or not friendly.alive:
+                    continue
+                if friendly.pos == destination:
+                    occupant_friendly = friendly
+                    break
+
+            if occupant_friendly is None:
+                for enemy in intel.visible_enemies:
+                    if enemy.position == destination:
+                        occupant_enemy = enemy
+                        break
+
+        shared_with = [eid for eid in move_conflicts.get(destination, []) if eid != mover.id]
+
+        details: Dict[str, Any] = {}
+        reasons: List[str] = []
+        severity: Optional[str] = None  # "BLOCKED" or "RISK"
+
+        if occupant_enemy:
+            severity = "BLOCKED"
+            reasons.append(f"Visible enemy at destination (id={occupant_enemy.id})")
+            details["occupied_by_enemy_id"] = occupant_enemy.id
+
+        if occupant_friendly:
+            if not occupant_friendly.can_move:
+                severity = "BLOCKED"
+                reasons.append(f"Immobile friendly occupying cell (id={occupant_friendly.id})")
+            else:
+                severity = severity or "RISK"
+                reasons.append(f"Friendly currently in cell (id={occupant_friendly.id}) and may or may not move away")
+            details["occupied_by_friendly_id"] = occupant_friendly.id
+            details["occupied_by_friendly_can_move"] = occupant_friendly.can_move
+
+        if shared_with:
+            severity = severity or "RISK"
+            reasons.append(f"Other allies also planning to move here: {shared_with}")
+            details["shared_destination_with"] = shared_with
+
+        if not reasons:
+            return None
+
+        details["severity"] = severity or "RISK"
+        details["reason"] = "; ".join(reasons)
+        return details
