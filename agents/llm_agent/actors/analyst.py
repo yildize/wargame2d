@@ -1,3 +1,5 @@
+from typing import Annotated, List, Literal, Optional, Union
+
 from pydantic_ai import Agent, RunContext
 from pydantic import BaseModel, Field
 
@@ -10,7 +12,7 @@ ANALYST_TASK = (
     "1) threats to AWACS or exposed units and safe repositioning ideas, "
     "2) high-value targets and feasible strikes this turn, "
     "3) radar/visibility gaps plus missing contacts with last-seen details, "
-    "4) recommended team intent for the next turn. Keep each entry short, direct, and commander-ready."
+    "4) recommended team intent for the next turn. Keep it under 120 words."
 )
 
 
@@ -19,12 +21,41 @@ class Position(BaseModel):
     y: int = Field(description="Y coordinate on the grid.")
 
 
-class Action(BaseModel):
-    type: str = Field(description="Action keyword such as MOVE, SHOOT, TOGGLE, or WAIT.")
-    target: int | None = Field(default=None, description="Target unit id if relevant to the action.")
-    direction: str | None = Field(default=None, description="Cardinal movement direction when applicable.")
-    destination: Position | None = Field(default=None, description="Destination coordinates for movement actions.")
-    on: bool | None = Field(default=None, description="Whether the action toggles a system on or off.")
+class MoveAction(BaseModel):
+    type: Literal["MOVE"] = Field(
+        default="MOVE",
+        description="Discriminator for movement actions.",
+    )
+    direction: Literal["UP", "DOWN", "LEFT", "RIGHT"] = Field(
+        description="Cardinal direction for the move.",
+        examples=["UP", "DOWN", "LEFT", "RIGHT"],
+    )
+    destination: Optional[Position] = Field(
+        default=None,
+        description="Destination after the move if known (x,y).",
+    )
+
+
+class ShootAction(BaseModel):
+    type: Literal["SHOOT"] = Field(default="SHOOT", description="Fire a weapon at a target unit.")
+    target: int = Field(description="Target unit id to engage.")
+
+
+class WaitAction(BaseModel):
+    type: Literal["WAIT"] = Field(default="WAIT", description="Hold position and take no action this turn.")
+
+
+class ToggleAction(BaseModel):
+    type: Literal["TOGGLE"] = Field(default="TOGGLE", description="Toggle a system on/off. Use only for SAM units.")
+    on: bool = Field(
+        description="True to activate SAM radar/weapon system, False to go dark/stealth. Only valid for SAM entities."
+    )
+
+
+Action = Annotated[
+    Union[MoveAction, ShootAction, ToggleAction, WaitAction],
+    Field(discriminator="type"),
+]
 
 
 class ActionAnalysis(BaseModel):
@@ -34,26 +65,26 @@ class ActionAnalysis(BaseModel):
 
 class UnitInsight(BaseModel):
     unit_id: int = Field(description="Identifier for the unit in the current game_state.")
-    role: str = Field(description="Role or mission context of the unit (e.g., escort, decoy, SAM).")
-    key_considerations: list[str] = Field(
+    role: str = Field(description="Role or mission context of the unit.")
+    key_considerations: List[str] = Field(
         description="Bullet points on threats, resources, positioning, or timing relevant to this unit."
     )
-    action_analysis: list[ActionAnalysis] = Field(
+    action_analysis: List[ActionAnalysis] = Field(
         description="Action options for the unit with their implications. Include all feasible options, even 'WAIT'."
     )
 
 
 class GameAnalysis(BaseModel):
-    unit_insights: list[UnitInsight] = Field(
+    unit_insights: List[UnitInsight] = Field(
         description="Unit-level analysis items. Start with the most threatened or impactful units."
     )
-    critical_alerts: list[str] = Field(
+    critical_alerts: List[str] = Field(
         description="Ordered list of urgent risks that demand commander attention, prefixed with severity."
     )
-    opportunities: list[str] = Field(
+    opportunities: List[str] = Field(
         description="Offensive or positional openings the team can exploit, prefixed with severity."
     )
-    constraints: list[str] = Field(
+    constraints: List[str] = Field(
         description="Key limitations such as ammo, detection gaps, terrain edges, or coordination risks."
     )
     spatial_status: str = Field(
@@ -89,6 +120,11 @@ Return JSON that matches the GameAnalysis schema:
 - constraints: limiting factors or coordination risks that affect options.
 - spatial_status: brief posture and positioning narrative.
 - situation_summary: concise commander-ready summary tying alerts and intent together.
+- Actions must use these types only (discriminator is 'type'):
+  - MOVE: direction in [UP, DOWN, LEFT, RIGHT], optional destination.
+  - SHOOT: target is enemy unit id.
+  - TOGGLE: on=true/false, only for SAM units (activates/deactivates radar/weapon system).
+  - WAIT: hold position.
 
 ### GAME STATE 
 {ctx.deps.game_state}

@@ -33,6 +33,7 @@ load_dotenv()
 logfire.configure(service_name="basic_agent")
 logfire.instrument_pydantic_ai()
 
+
 @register_agent("llm_basic")
 class LLMAgent(BaseAgent):
     """
@@ -59,8 +60,6 @@ class LLMAgent(BaseAgent):
         self.prompt_config = PromptConfig()
         # Track last-seen info for enemies that drop out of visibility.
         self._enemy_memory: Dict[int, Dict[str, Any]] = {}
-
-
 
     def get_actions(
             self,
