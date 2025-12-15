@@ -59,7 +59,7 @@ def find_model_by_id(
 
 if __name__ == "__main__":
     # Simple demo: fetch and display one model by id.
-    MODEL_ID = "qwen/qwen3-coder:exacto"
+    MODEL_ID = "qwen/qwen3-vl-30b-a3b-thinking"
     result = find_model_by_id(MODEL_ID, pretty=True)
     if result:
         print(result)

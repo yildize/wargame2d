@@ -1,11 +1,7 @@
-"""
-Random agent implementation for testing and baseline comparison.
-
-This agent makes random valid decisions for all its entities.
-"""
 import json
 import random
 from copy import deepcopy
+from enum import Enum
 from typing import Dict, Any, Optional, TYPE_CHECKING, List, Set
 from .actors.analyst import analyst_agent, GameAnalysis, ActionAnalysis
 from env.core.actions import Action
@@ -21,6 +17,7 @@ from .actors.executer import (
 )
 from .actors.game_deps import GameDeps
 from .actors.strategist import strategist_agent
+from .actors.watchdog import watchdog_agent, CallbackAssessment
 from .prompts.analyst import ANALYST_USER_PROMPT_TEMPLATE
 from .prompts.game_info import GAME_INFO
 from ..base_agent import BaseAgent
@@ -103,8 +100,11 @@ class LLMAgent(BaseAgent):
         )
 
         self.game_deps.current_state_dict = state_dict
-        include_strategy = self.game_deps.current_turn_number == 0
-        actions, metadata = self._play_turn(state_dict, allowed_actions, include_strategy)
+        if step_info is not None:
+            # Keep only the most recent step info for watchdog decisions.
+            self.game_deps.step_info_list = [step_info]
+        initial_strategy = self.game_deps.current_turn_number == 0
+        actions, metadata = self._play_turn(state_dict, allowed_actions, initial_strategy)
         self.game_deps.current_turn_number += 1
 
 
@@ -138,27 +138,60 @@ class LLMAgent(BaseAgent):
             self,
             state_dict: dict[str, Any],
             allowed_actions: Dict[int, list[Action]],
-            include_strategy: bool,
+            initial_strategy: bool,
     ):
         # Analyse current state
+        last_step_info = self._format_last_step_info()
+        last_step_logs = ""
+        if last_step_info:
+            last_step_logs = json.dumps(last_step_info, default=str, indent=2, ensure_ascii=False)
+
         user_prompt = ANALYST_USER_PROMPT_TEMPLATE.format(
             game_info=GAME_INFO,
             game_state_json=json.dumps(state_dict, default=str, indent=2, ensure_ascii=False),
+            last_step_logs=last_step_logs,
         )
+
         analyst_res = analyst_agent.run_sync(user_prompt=user_prompt)
         analysis: Optional[GameAnalysis] = getattr(analyst_res, "output", None)
         analysed_state_dict = self._merge_analysis(state_dict, analysis) if analysis else None
         self.game_deps.analysed_state_dict = analysed_state_dict
 
+        state_for_watchdog = analysed_state_dict or state_dict
+        callback_decision: Optional[CallbackAssessment] = None
+        if self.game_deps.callback_conditions:
+            callback_decision = self._run_watchdog(state_for_watchdog)
+
+        include_strategy = initial_strategy or (
+            callback_decision is not None and callback_decision.needs_callback
+        )
+        self.game_deps.just_replanned = include_strategy and not initial_strategy
+
         # Optionally (first turn) create strategy
         strategy_output = None
         if include_strategy:
+            prompt_sections = [
+                "Use the current state below to issue a concise multi-phase plan."
+            ]
+
+            if callback_decision and callback_decision.needs_callback:
+                prompt_sections.append("CALLBACK TRIGGERED: Replan based on the reason and recent changes.")
+                if callback_decision.reason:
+                    prompt_sections.append(f"CALLBACK REASON: {callback_decision.reason}")
+
+            last_plan = self._format_last_plan()
+            if last_plan:
+                prompt_sections.append("LAST STRATEGY (for context):")
+                prompt_sections.append(json.dumps(last_plan, indent=2, ensure_ascii=False))
+
+            prompt_sections.append("CURRENT STATE:")
+            prompt_sections.append(json.dumps(state_for_watchdog, indent=2, ensure_ascii=False))
+
+            if callback_decision and callback_decision.needs_callback and callback_decision.reason:
+                prompt_sections.append("FOCUS: Adjust the plan specifically to the callback trigger above.")
+
             strategist_res = strategist_agent.run_sync(
-                user_prompt=(
-                    "Use the analysed state below to issue a concise multi-phase plan.\n"
-                    "ANALYSED STATE:\n"
-                    f"{json.dumps(analysed_state_dict or state_dict, indent=2, ensure_ascii=False)}"
-                ),
+                user_prompt="\n".join(prompt_sections),
                 deps=self.game_deps,
             )
             strategy_output = getattr(strategist_res, "output", None)
@@ -167,10 +200,11 @@ class LLMAgent(BaseAgent):
                 self.game_deps.current_phase_strategy = self._safe_model_dump(strategy_output.current_phase_plan)
                 self.game_deps.entity_roles = {role.entity_id: role.role for role in strategy_output.roles}
                 self.game_deps.callback_conditions = self._safe_model_dump(strategy_output.callbacks)
+                self.game_deps.callback_conditions_set_turn = self.game_deps.current_turn_number
 
         # Execute based on strategy and analysed state
         exec_user_prompt = (
-            "Use the analysed state JSON to pick one action per friendly unit. "
+            "Use the current state JSON to pick one action per friendly unit. "
             "Follow the current phase guidance and assigned roles. "
             "Return the TeamAction schema only.\n"
             f"{json.dumps(analysed_state_dict or state_dict, indent=2, ensure_ascii=False)}"
@@ -187,9 +221,53 @@ class LLMAgent(BaseAgent):
             "strategy_raw_response": self._safe_model_dump(strategy_output),
             "executor_raw_response": self._safe_model_dump(executor_output),
             "executor_action_conversion_errors": conversion_errors if conversion_errors else None,
+            "watchdog_raw_response": self._safe_model_dump(callback_decision),
+            "strategy_callback_triggered": bool(callback_decision.needs_callback) if callback_decision else False,
         }
         return actions, metadata
 
+
+
+    def _run_watchdog(
+            self,
+            state_dict: dict[str, Any],
+    ) -> Optional[CallbackAssessment]:
+        """Run the watchdog agent to see if strategist callbacks should trigger."""
+        conditions = self._safe_model_dump(self.game_deps.callback_conditions) or []
+        prompt = (
+            "Determine whether to trigger a strategist callback using the conditions and current state."
+            f"\nCALLBACK CONDITIONS SET ON TURN: {self.game_deps.callback_conditions_set_turn}"
+            f"\nCALLBACK CONDITIONS:\n{json.dumps(conditions, default=str, indent=2, ensure_ascii=False)}"
+            f"\nCURRENT TURN: {self.game_deps.current_turn_number}"
+            "\n\nCURRENT STATE:\n"
+            f"{json.dumps(state_dict, default=str, indent=2, ensure_ascii=False)}"
+            "\n\nLAST STEP LOGS (movement/combat/victory):\n"
+            f"{json.dumps(self._format_last_step_info(), default=str, indent=2, ensure_ascii=False)}"
+        )
+        watchdog_res = watchdog_agent.run_sync(user_prompt=prompt, deps=self.game_deps)
+        return getattr(watchdog_res, "output", None)
+
+    def _format_last_plan(self) -> Optional[dict[str, Any]]:
+        """Return the last strategist outputs we cached, if any."""
+        if not (self.game_deps.multi_phase_strategy or self.game_deps.current_phase_strategy):
+            return None
+        return {
+            "multi_phase_plan": self.game_deps.multi_phase_strategy,
+            "current_phase_plan": self.game_deps.current_phase_strategy,
+            "roles": self.game_deps.entity_roles,
+            "callbacks": self.game_deps.callback_conditions,
+        }
+
+
+    def _format_last_step_info(self) -> Optional[dict[str, Any]]:
+        """Return the most recent step_info as a serializable dict, if present."""
+        if not self.game_deps.step_info_list:
+            return None
+        last_step = self.game_deps.step_info_list[-1]
+        to_dict = getattr(last_step, "to_dict", None)
+        if callable(to_dict):
+            return to_dict()
+        return getattr(last_step, "__dict__", None) or {"raw": str(last_step)}
 
 
     def _convert_entity_actions(
@@ -409,10 +487,16 @@ class LLMAgent(BaseAgent):
     def _safe_model_dump(model_obj: Any) -> Any:
         if model_obj is None:
             return None
+        if isinstance(model_obj, Enum):
+            return model_obj.value if hasattr(model_obj, "value") else model_obj.name
+        if isinstance(model_obj, dict):
+            return {k: LLMAgent._safe_model_dump(v) for k, v in model_obj.items()}
+        if isinstance(model_obj, (list, tuple, set)):
+            return [LLMAgent._safe_model_dump(v) for v in model_obj]
         dump = getattr(model_obj, "model_dump", None)
         if callable(dump):
-            return dump()
+            return LLMAgent._safe_model_dump(dump())
         to_dict = getattr(model_obj, "dict", None)
         if callable(to_dict):
-            return to_dict()
+            return LLMAgent._safe_model_dump(to_dict())
         return model_obj

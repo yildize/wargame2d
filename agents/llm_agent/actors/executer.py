@@ -2,7 +2,7 @@ import json
 from typing import Literal, Union, List, Annotated
 
 from pydantic import BaseModel, Field
-from pydantic_ai import Agent, ModelSettings, RunContext
+from pydantic_ai import Agent, RunContext
 
 from agents.llm_agent.actors.game_deps import GameDeps
 from agents.llm_agent.prompts.game_info import GAME_INFO
@@ -85,17 +85,17 @@ Output the TeamAction schema only. Avoid narration outside the schema.
 
 # --- Agent definition ---
 player = Agent(
-    "openrouter:qwen/qwen3-coder:exacto",
-    model_settings=ModelSettings(
-        temperature=0.7,
-        top_p=0.8,
-        max_tokens=32_000,
-        extra_body={
-            "top_k": 20,
-            "min_p": 0,
-            "repetition_penalty": 1.05,
-        }
-    ),
+    "openrouter:deepseek/deepseek-v3.1-terminus:exacto",
+    # model_settings=ModelSettings(
+    #     temperature=0.7,
+    #     top_p=0.8,
+    #     max_tokens=32_000,
+    #     extra_body={
+    #         "top_k": 20,
+    #         "min_p": 0,
+    #         "repetition_penalty": 1.05,
+    #     }
+    # ),
     retries=3,
     output_retries=3,
     output_type=TeamAction,

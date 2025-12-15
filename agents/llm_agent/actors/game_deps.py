@@ -16,8 +16,8 @@ class GameDeps:
     multi_phase_strategy: Optional[str] = None
     current_phase_strategy: Optional[str] = None
     entity_roles: Optional[dict[int, str]] = None
-    callback_conditions: Optional[str] = None
+    callback_conditions: Optional[list[str]] = None
+    callback_conditions_set_turn: Optional[int] = None
 
     game_state: dict[int, Any] = field(default_factory=dict)
     step_info_list: list["StepInfo"] = field(default_factory=list)
-

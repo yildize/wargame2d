@@ -55,8 +55,8 @@ GAME_INFO = """
 **SAM (Surface-to-Air Missile)**
 - Stationary armed defense unit that always occupies its cell (even when stealthed)
 - Can TOGGLE between states:
-  - **Active (ON):** Detectable, can shoot
-  - **Stealth (OFF):** Immediately invisible to enemy radar, cannot shoot or be targeted
+  - Active (ON): Detectable, can shoot
+  - Stealth (OFF): Immediately invisible to enemy radar, cannot shoot or be targeted
 - Has cooldown period between shots (typically 5 turns, may vary by scenario)
 - Can SHOOT, TOGGLE, or WAIT
 

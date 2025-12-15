@@ -2,15 +2,13 @@ import json
 from typing import List, Literal, Optional
 
 from dotenv import load_dotenv
-from pydantic_ai import Agent, ModelSettings, RunContext
+from pydantic_ai import Agent
 from pydantic import BaseModel, Field
+from pydantic_ai.models.openrouter import OpenRouterModelSettings
 
 from agents.llm_agent.actors.game_deps import GameDeps
-from agents.llm_agent.prompts.tactics import TACTICAL_GUIDE
-from agents.llm_agent.prompts.analyst import (
-    ANALYST_SYSTEM_PROMPT,
-    ANALYST_USER_PROMPT_TEMPLATE,
-)
+from agents.llm_agent.prompts.game_info import GAME_INFO
+from agents.llm_agent.prompts.analyst import ANALYST_SYSTEM_PROMPT, ANALYST_USER_PROMPT_TEMPLATE
 
 load_dotenv()
 
@@ -81,26 +79,32 @@ class GameAnalysis(BaseModel):
         description="Overall tactical snapshot combining threats, openings, and intent for the next turn."
     )
 
+# Use OpenRouterModelSettings for reasoning
+# openrouter_settings = OpenRouterModelSettings(
+#     temperature=0.7,
+#     top_p=0.8,
+#     max_tokens=32_000,
+#     openrouter_reasoning={'effort': 'high'},  # This is the key!
+#     extra_body={
+#         "top_k": 20,
+#         "min_p": 0,
+#         "repetition_penalty": 1.05,
+#     }
+# )
+
+openrouter_settings = OpenRouterModelSettings(
+    # temperature=1.0,
+    # top_p=1.0,
+    max_tokens=1024 * 32,
+    openrouter_reasoning={"effort": "low"},
+)
 analyst_agent = Agent(
-    "openrouter:qwen/qwen3-coder:exacto",
-    model_settings=ModelSettings(
-        temperature=0.7,
-        top_p=0.8,
-        max_tokens=32_000,
-        extra_body={
-            "top_k": 20,
-            "min_p": 0,
-            "repetition_penalty": 1.05,
-        }
-    ),
+    "openrouter:deepseek/deepseek-v3.1-terminus:exacto",
+    model_settings=openrouter_settings,
     deps_type=GameDeps,
     output_type=GameAnalysis,
-    instructions=ANALYST_SYSTEM_PROMPT,
 )
 
-# @analyst_agent.instructions
-# def full_prompt(ctx: RunContext[GameDeps]) -> str:
-#
-#     return ANALYST_USER_PROMPT_TEMPLATE.format(
-#         game_state_json=json.dumps(ctx.deps.current_state_dict, default=str, indent=2, ensure_ascii=False)
-#     )
+@analyst_agent.instructions
+def full_prompt() -> str:
+    return ANALYST_SYSTEM_PROMPT.format(GAME_INFO=GAME_INFO)
