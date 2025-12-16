@@ -58,7 +58,7 @@ def _default_team_orientations() -> Dict[str, TeamOrientation]:
 @dataclass
 class CompactFormatterConfig:
     nearby_unit_distance: float = 3.0
-    nearby_enemy_distance: float = 6.0
+    nearby_enemy_distance: float = 5.0
     threat_approach_buffer: float = 2.0  # how far outside enemy range counts as CAUTION
     grouping_radius: float = 3.0  # reserved for future enemy grouping hints
     include_dead_entities: bool = True
@@ -117,7 +117,7 @@ class CompactStateFormatter:
         }
 
         if self.config.include_dead_entities:
-            payload["dead_entities"] = self._dead_entities(world, casualties)
+            payload["dead_entities"] = self._dead_entities(intel, casualties)
         if casualties is not None:
             payload["casualties"] = casualties
         if self.config.include_orientation_metadata:
@@ -236,26 +236,38 @@ class CompactStateFormatter:
         unit_sections = self._unit_sections(intel, allowed_actions, self.config)
         if unit_sections:
             lines.append("")
-            lines.append("TACTICAL UNIT OVERVIEW & ENGAGEMENT OPTIONS")
+            lines.append("ALLY UNITS & OPTIONS")
             lines.append("-" * 72)
             lines.extend(self._terminology_lines())
+            lines.append("")  # Spacer after terminology for readability
             lines.extend(unit_sections)
 
         distant = self._distant_enemies(intel, self.config)
         if distant:
             lines.append("")
-            lines.append(f"UNENGAGED VISIBLE ENEMIES (outside {self.config.nearby_enemy_distance})")
+            lines.append(f"DISTANT VISIBLE ENEMIES (>{self.config.nearby_enemy_distance})")
             lines.append("-" * 72)
             for entry in distant:
                 parts = [
                     f"- Enemy #{entry['enemy_id']} {entry['type']} at ({entry['position']['x']}, {entry['position']['y']})",
-                    f"nearest_friendly_dist={entry['nearest_friendly_distance']}",
+                    f"closest_ally_dist={entry.get('nearest_friendly_distance')}",
                 ]
                 if entry.get("risk_level"):
                     parts.append(f"risk={entry['risk_level']}")
+                if entry.get("threat_type"):
+                    parts.append(f"threat={entry['threat_type']}")
                 if entry.get("threat_type") == "UNARMED":
                     parts.append("cannot shoot")
                 lines.append(" ".join(parts))
+
+        move_conflicts = self._collect_move_conflicts(allowed_actions, intel)
+        collision_section = self._format_collision_section(move_conflicts)
+        if collision_section:
+            lines.append("")
+            lines.append("POTENTIAL MOVE COLLISIONS (ALLIES)")
+            lines.append("-" * 72)
+            lines.append("Note: multiple allies could enter the same cell next turn.")
+            lines.extend(collision_section)
 
         return "\n".join(lines)
 
@@ -341,17 +353,22 @@ class CompactStateFormatter:
 
     def _dead_entities(
         self,
-        world: WorldState,
+        intel: TeamIntel,
         casualties: Optional[Dict[str, List[Dict[str, Any]]]],
     ) -> List[Dict[str, Any]]:
-        dead: List[Dict[str, Any]] = []
+        """
+        Dead-entity list constrained to what our team plausibly knows.
+        """
         if casualties:
             # Prefer enriched casualty records if provided
+            dead: List[Dict[str, Any]] = []
             dead.extend(casualties.get("friendly", []))
             dead.extend(casualties.get("enemy", []))
             return dead
 
-        for entity in world.get_all_entities():
+        # Fallback: only include our own dead friendlies (no fog-breaking enemy info).
+        dead: List[Dict[str, Any]] = []
+        for entity in intel.friendlies:
             if entity.alive:
                 continue
             dead.append(
@@ -513,7 +530,14 @@ class CompactStateFormatter:
         for entity in intel.friendlies:
             if not entity.alive:
                 continue
-            sections.extend(self._format_unit_block(entity, intel, allowed_actions.get(entity.id, []), cfg))
+            sections.extend(
+                self._format_unit_block(
+                    entity,
+                    intel,
+                    allowed_actions.get(entity.id, []),
+                    cfg,
+                )
+            )
             sections.append("")  # spacer between units
         return sections
 
@@ -538,9 +562,13 @@ class CompactStateFormatter:
         missiles = getattr(entity, "missiles", None)
         if missiles is not None:
             caps.append(f"Missiles={missiles}")
-        radar = getattr(entity, "get_active_radar_range", lambda: None)()
-        if radar:
-            caps.append(f"RadarRange={radar} (cells)")
+        radar_active = getattr(entity, "get_active_radar_range", lambda: None)()
+        radar_nominal = getattr(entity, "radar_range", None)
+        if radar_nominal is not None and radar_nominal > 0:
+            if radar_active and radar_active > 0:
+                caps.append(f"RadarRange={radar_nominal} (active)")
+            else:
+                caps.append(f"RadarRange={radar_nominal} (currently OFF)")
         weapon_range = getattr(entity, "missile_max_range", None)
         if weapon_range is not None:
             caps.append(f"WeaponRange={weapon_range} (cells)")
@@ -562,7 +590,7 @@ class CompactStateFormatter:
                 else:
                     lines.append("    - SAM Status: ON & READY (visible to enemies)")
             else:
-                lines.append("    - SAM Status: OFF (not emitting/visible; cannot shoot while off)")
+                lines.append("    - SAM Status: OFF (not emitting/visible; radar off; cannot shoot while off)")
 
         # Nearby allies
         nearby_allies = self._get_nearby_allies(entity, intel, cfg)
@@ -583,8 +611,10 @@ class CompactStateFormatter:
             lines.append(f"  Threats (within {cfg.nearby_enemy_distance}):")
             for threat in detected:
                 rel = threat["relative_position"]
+                risk_level = threat.get("risk_level") or "UNKNOWN"
+                threat_type = threat.get("threat_type") or "UNKNOWN"
                 desc_parts = [
-                    f"risk={threat.get('risk_level')} Enemy #{threat['enemy_id']} {threat['type']}",
+                    f"risk={risk_level} threat={threat_type} Enemy #{threat['enemy_id']} {threat['type']}",
                     f"rel={rel['direction']} (dx={rel['dx']}, dy={rel['dy']}, dist={rel['distance']})",
                 ]
                 if threat.get("has_fired_before"):
@@ -627,18 +657,57 @@ class CompactStateFormatter:
             lines.append("    - WAIT")
         if not (move_lines or shoot_lines or toggle or available.get("can_wait")):
             lines.append("    - none")
+
+        # Blocked moves (informational, not offered as available)
+        blocked_moves = [
+            m for m in available.get("movement_options", []) if not m.get("allowed") and m.get("blocked_reason")
+        ]
+        if blocked_moves:
+            lines.append("  Blocked Moves:")
+            for m in blocked_moves:
+                reason = m.get("blocked_reason")
+                blocker = m.get("blocked_by_id")
+                blocker_type = None
+                if blocker is not None:
+                    blocker_ent = intel.get_friendly(blocker) or intel.get_enemy(blocker)
+                    if blocker_ent:
+                        blocker_type = getattr(blocker_ent.kind, "name", str(blocker_ent.kind))
+
+                if reason == "blocked_by_enemy_immobile" and blocker:
+                    lines.append(
+                        f"    - {m['direction']} (enemy #{blocker} {blocker_type or ''} occupying; likely hard block)".rstrip()
+                    )
+                elif reason == "blocked_by_enemy_maybe_moves" and blocker:
+                    lines.append(
+                        f"    - {m['direction']} (enemy #{blocker} {blocker_type or ''} currently there; could vacate)".rstrip()
+                    )
+                elif reason == "blocked_by_friendly_immobile" and blocker:
+                    lines.append(
+                        f"    - {m['direction']} (ally #{blocker} {blocker_type or ''} immobile; hard block)".rstrip()
+                    )
+                elif reason == "blocked_by_friendly_maybe_moves" and blocker:
+                    lines.append(
+                        f"    - {m['direction']} (ally #{blocker} {blocker_type or ''} currently there; opens if they move away)".rstrip()
+                    )
+                elif reason == "out_of_bounds":
+                    lines.append(f"    - {m['direction']} (out of bounds)")
+                elif reason:
+                    lines.append(f"    - {m['direction']} ({reason})")
+
         return lines
 
     def _terminology_lines(self) -> List[str]:
         """Reusable legend to keep unit sections compact but unambiguous."""
         return [
             "  Terminology:",
-            "    - rel=<DIR> (dx, dy, dist): direction and offsets from this unit; x: left-/right+, y: down-/up+; dist=straight-line.",
-            "    - Risk: DANGER=enemy can engage now; CAUTION=likely in range next turn; SAFE=outside engagement by a margin; UNARMED=cannot shoot.",
+            "    - rel=<DIR> (dx, dy, dist): direction and offsets from this unit; x: left-/right+, y: down-/up+; dist=straight-line (grid cells).",
+            "    - Risk/threat: DANGER=can shoot; CAUTION=almost in range; SAFE=out of range; UNARMED=cannot shoot.",
+            "    - closest_ally_dist: straight-line distance from that enemy to the nearest friendly (grid cells).",
             "    - Safe margin: cells we are outside the enemy's assumed max range (armed enemies only).",
             "    - Confirmed shooter: has fired before, so not a decoy.",
             "    - our_hit: estimated hit probability if we shoot them now; enemy_hit: estimated hit probability if they shoot us now.",
             "    - out_of_range_by: how many cells we are short of our own weapon range for that target.",
+            "    - Move collisions: cells multiple allies could move into next turn (avoid duplicate selection).",
         ]
 
     # ------------------------------------------------------------------ #
@@ -859,40 +928,26 @@ class CompactStateFormatter:
             if friendly.id == mover.id or not friendly.alive:
                 continue
             if friendly.pos == destination:
-                return "blocked_by_friendly", friendly.id
+                if getattr(friendly, "can_move", False):
+                    return "blocked_by_friendly_maybe_moves", friendly.id
+                return "blocked_by_friendly_immobile", friendly.id
 
         for enemy in intel.visible_enemies:
             if enemy.position == destination:
-                return "blocked_by_enemy", enemy.id
+                can_move = getattr(enemy, "can_move", True)
+                if can_move:
+                    return "blocked_by_enemy_maybe_moves", enemy.id
+                return "blocked_by_enemy_immobile", enemy.id
 
         return None, None
 
     def _format_move_actions(self, move_options: List[Dict[str, Any]], can_move: bool) -> List[str]:
         if not can_move:
-            return ["MOVE: not available (immobile)"]
+            return []
         allowed = [m["direction"] for m in move_options if m.get("allowed")]
-        blocked_entries = [
-            m for m in move_options if not m.get("allowed") and m.get("blocked_reason")
-        ]
-        lines: List[str] = []
-        if allowed:
-            lines.append("MOVE: " + "/".join(allowed))
-        if blocked_entries:
-            reasons = []
-            for m in blocked_entries:
-                reason = m.get("blocked_reason")
-                blocker = m.get("blocked_by_id")
-                if reason == "blocked_by_enemy" and blocker:
-                    reasons.append(f"{m['direction']} (blocked by enemy #{blocker})")
-                elif reason == "blocked_by_friendly" and blocker:
-                    reasons.append(f"{m['direction']} (blocked by ally #{blocker})")
-                elif reason:
-                    reasons.append(f"{m['direction']} (blocked: {reason})")
-            if reasons:
-                lines.append("Blocked moves: " + "; ".join(reasons))
-        if not lines:
-            lines.append("MOVE: none")
-        return lines
+        if not allowed:
+            return []
+        return ["MOVE: " + "/".join(allowed)]
 
     def _format_shoot_actions(self, shooting_options: List[Dict[str, Any]]) -> List[str]:
         lines: List[str] = []
@@ -949,3 +1004,42 @@ class CompactStateFormatter:
         elif dy < 0:
             parts.append(f"{abs(dy)} down")
         return ", ".join(parts) if parts else "same position"
+
+    def _collect_move_conflicts(
+        self,
+        allowed_actions: Dict[int, List[Action]],
+        intel: TeamIntel,
+    ) -> Dict[Tuple[int, int], List[Tuple[int, str, str]]]:
+        """
+        Build a map of destination -> list[(entity_id, type, direction)] for all ally MOVE actions.
+
+        This flags cells that multiple friendlies could move into (potential collision risk).
+        """
+        conflicts: Dict[Tuple[int, int], List[Tuple[int, str, str]]] = {}
+        for entity_id, actions in allowed_actions.items():
+            friendly = intel.get_friendly(entity_id)
+            if friendly is None or not friendly.alive:
+                continue
+            for action in actions:
+                if action.type != ActionType.MOVE:
+                    continue
+                direction: MoveDir = action.params.get("dir")  # type: ignore[assignment]
+                dest = self._calculate_destination(friendly.pos, direction)
+                ent_type = getattr(friendly.kind, "name", str(friendly.kind))
+                conflicts.setdefault(dest, []).append((entity_id, ent_type, direction.name))
+        # Keep only contested destinations (2+)
+        return {dest: tuples for dest, tuples in conflicts.items() if len(tuples) > 1}
+
+    def _format_collision_section(
+        self,
+        move_conflicts: Dict[Tuple[int, int], List[Tuple[int, str, str]]],
+    ) -> List[str]:
+        lines: List[str] = []
+        for dest, ids in sorted(move_conflicts.items()):
+            details = []
+            for eid, etype, direction in ids:
+                details.append(f"#{eid} {etype} via {direction}")
+            lines.append(
+                f"- Cell ({dest[0]}, {dest[1]}): " + "; ".join(details) + " -> collision risk (same destination)"
+            )
+        return lines

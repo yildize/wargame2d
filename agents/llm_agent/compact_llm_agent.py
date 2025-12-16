@@ -9,6 +9,8 @@ from agents.base_agent import BaseAgent
 from agents.team_intel import TeamIntel
 from agents.registry import register_agent
 from agents.llm_agent.helpers.compact_state_formatter import CompactStateFormatter
+from agents.llm_agent.actors.game_deps import GameDeps
+from agents.llm_agent.actors.strategist_compact import strategist_compact_agent
 
 if TYPE_CHECKING:
     from env.environment import StepInfo
@@ -36,6 +38,9 @@ class LLMCompactAgent(BaseAgent):
         self._enemy_memory: Dict[int, Dict[str, Any]] = {}
         self._casualties: Dict[str, List[Dict[str, Any]]] = {"friendly": [], "enemy": []}
         self._recorded_kill_ids: Set[int] = set()
+        self._strategy_plan: Optional[Dict[str, Any]] = None
+        self.game_deps = GameDeps()
+        self._step_logs: Dict[int, Dict[str, Any]] = {}
 
     def get_actions(
         self,
@@ -50,7 +55,10 @@ class LLMCompactAgent(BaseAgent):
 
         visible_enemy_ids = self._update_enemy_memory(intel, world.turn)
         missing_enemies = self._collect_missing_enemies(visible_enemy_ids, world.turn)
-        self._update_casualties(step_info, world)
+        self._update_casualties(step_info, world, intel)
+        visible_step_log = self._distill_step_info(step_info, intel, world)
+        if visible_step_log is not None:
+            self._step_logs[world.turn - 1] = visible_step_log
 
         for entity in intel.friendlies:
             if not entity.alive:
@@ -80,10 +88,16 @@ class LLMCompactAgent(BaseAgent):
             casualties=self._casualties,
         )
 
+        strategy_plan, strategy_error = self._maybe_get_strategy(world, state_dict, state_text)
+
         metadata = {
             "compact_state": state_dict,
             "compact_state_text": state_text,
             "note": "State-only pass; actions are safe fallbacks.",
+            "visible_step_log": visible_step_log,
+            "visible_history": self._step_logs,
+            "strategy_plan": strategy_plan,
+            "strategy_error": strategy_error,
         }
 
         print(state_text)
@@ -113,7 +127,7 @@ class LLMCompactAgent(BaseAgent):
             missing.append({**entry, "turns_since_seen": turns_since_seen})
         return missing
 
-    def _update_casualties(self, step_info: Optional["StepInfo"], world: WorldState) -> None:
+    def _update_casualties(self, step_info: Optional["StepInfo"], world: WorldState, intel: TeamIntel) -> None:
         """
         Record deaths with killer info and death location/turn.
         """
@@ -141,6 +155,16 @@ class LLMCompactAgent(BaseAgent):
             entity = world.get_entity(entity_id)
             if entity is None:
                 continue
+
+            killer_id = killers.get(entity_id)
+            killer_is_friendly = killer_id in intel.friendly_ids if killer_id is not None else False
+            enemy_was_visible = entity_id in intel.visible_enemy_ids
+            is_friendly = entity.team == self.team
+
+            # Only log enemy losses if we plausibly observed them (visible or killed by us).
+            if not is_friendly and not enemy_was_visible and not killer_is_friendly:
+                continue
+
             entry: Dict[str, Any] = {
                 "id": entity.id,
                 "team": entity.team.name if hasattr(entity.team, "name") else str(entity.team),
@@ -148,7 +172,6 @@ class LLMCompactAgent(BaseAgent):
                 "death_position": {"x": entity.pos[0], "y": entity.pos[1]},
                 "killed_on_turn": killed_on_turn,
             }
-            killer_id = killers.get(entity_id)
             if killer_id is not None:
                 killer_ent = world.get_entity(killer_id)
                 if killer_ent:
@@ -160,10 +183,13 @@ class LLMCompactAgent(BaseAgent):
                 else:
                     entry["killed_by"] = {"id": killer_id}
 
-            if entity.team == self.team:
+            if is_friendly:
                 self._casualties["friendly"].append(entry)
             else:
                 self._casualties["enemy"].append(entry)
+                # Clear enemy from memory so it stops appearing as "missing".
+                self._enemy_memory.pop(entity_id, None)
+
             self._recorded_kill_ids.add(entity_id)
 
     @staticmethod
@@ -176,3 +202,122 @@ class LLMCompactAgent(BaseAgent):
         if move_action:
             return move_action
         return allowed[0]
+
+    def _distill_step_info(
+        self,
+        step_info: Optional["StepInfo"],
+        intel: TeamIntel,
+        world: WorldState,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Build a fog-safe log of last turn's visible movement and combat.
+        """
+        if step_info is None:
+            return None
+
+        movement_entries: List[Dict[str, Any]] = []
+        for result in getattr(step_info.movement, "movement_results", []) or []:
+            entity_id = result.entity_id
+            friendly = intel.get_friendly(entity_id)
+            enemy_visible = entity_id in intel.visible_enemy_ids
+            if not friendly and not enemy_visible:
+                continue
+            mover = friendly or intel.get_enemy(entity_id)
+            entry: Dict[str, Any] = {
+                "entity_id": entity_id,
+                "team": mover.team.name if mover and hasattr(mover, "team") else None,
+                "type": mover.kind.name if mover and hasattr(mover, "kind") else None,
+                "success": result.success,
+                "from": {"x": result.old_pos[0], "y": result.old_pos[1]},
+                "to": {"x": result.new_pos[0], "y": result.new_pos[1]},
+                "direction": self._infer_direction(result.old_pos, result.new_pos),
+                "failure_reason": result.failure_reason,
+            }
+            movement_entries.append(entry)
+
+        combat_entries: List[Dict[str, Any]] = []
+        for result in getattr(step_info.combat, "combat_results", []) or []:
+            attacker_friend = intel.get_friendly(result.attacker_id)
+            target_friend = intel.get_friendly(result.target_id) if result.target_id is not None else None
+            attacker_visible_enemy = result.attacker_id in intel.visible_enemy_ids
+            target_visible_enemy = (
+                result.target_id in intel.visible_enemy_ids if result.target_id is not None else False
+            )
+
+            # Only include if any party is friendly or currently visible enemy.
+            if not (attacker_friend or target_friend or attacker_visible_enemy or target_visible_enemy):
+                continue
+
+            attacker_info: Dict[str, Any] = {}
+            if attacker_friend or attacker_visible_enemy:
+                attacker_ent = attacker_friend or intel.get_enemy(result.attacker_id)
+                attacker_info = {
+                    "id": result.attacker_id,
+                    "team": attacker_ent.team.name if attacker_ent and hasattr(attacker_ent, "team") else None,
+                    "type": attacker_ent.kind.name if attacker_ent and hasattr(attacker_ent, "kind") else None,
+                }
+            else:
+                attacker_info = {"id": None, "team": None, "type": "UNKNOWN"}
+
+            target_info: Dict[str, Any] = {}
+            if target_friend or target_visible_enemy:
+                target_ent = target_friend or intel.get_enemy(result.target_id) if result.target_id is not None else None
+                target_info = {
+                    "id": result.target_id,
+                    "team": target_ent.team.name if target_ent and hasattr(target_ent, "team") else None,
+                    "type": target_ent.kind.name if target_ent and hasattr(target_ent, "kind") else None,
+                }
+            else:
+                target_info = {"id": None, "team": None, "type": "UNKNOWN"}
+
+            combat_entries.append(
+                {
+                    "attacker": attacker_info,
+                    "target": target_info,
+                    "fired": bool(result.success),
+                    "hit": result.hit if result.success else None,
+                    "target_killed": result.target_killed if result.success else False,
+                }
+            )
+
+        return {
+            "turn": max(world.turn - 1, 0),
+            "movement": movement_entries,
+            "combat": combat_entries,
+        }
+
+    def _maybe_get_strategy(
+        self,
+        world: WorldState,
+        state_dict: Dict[str, Any],
+        state_text: str,
+    ) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
+        """
+        Invoke the compact strategist once at game start to get an initial plan.
+        """
+        if self._strategy_plan is not None:
+            return self._strategy_plan, None
+
+        # Only call on the first visible turn to avoid repeated calls.
+        if world.turn > 1:
+            return None, None
+
+        try:
+            self.game_deps.current_turn_number = world.turn
+            self.game_deps.current_state_dict = state_dict
+            result = strategist_compact_agent.run_sync(user_prompt=state_text, deps=self.game_deps)
+            self._strategy_plan = result.data if hasattr(result, "data") else result
+            return self._strategy_plan, None
+        except Exception as exc:
+            return None, f"strategy call failed: {exc}"
+
+    @staticmethod
+    def _infer_direction(old_pos: tuple[int, int], new_pos: tuple[int, int]) -> Optional[str]:
+        dx = new_pos[0] - old_pos[0]
+        dy = new_pos[1] - old_pos[1]
+        if dx == 0 and dy == 0:
+            return None
+        for move_dir in [MoveDir.UP, MoveDir.DOWN, MoveDir.LEFT, MoveDir.RIGHT]:
+            if (dx, dy) == move_dir.delta:
+                return move_dir.name
+        return f"dx={dx},dy={dy}"
