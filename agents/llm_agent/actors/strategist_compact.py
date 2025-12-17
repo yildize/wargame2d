@@ -1,7 +1,6 @@
 from typing import List
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
-from pydantic import model_validator
 from pydantic_ai import Agent
 from pydantic_ai.models.openrouter import OpenRouterModelSettings
 
@@ -22,19 +21,6 @@ class StrategyOutput(BaseModel):
     strategy: str = Field(description="High-level short-term gameplan to win as a team.")
     unit_strategies: List[UnitStrategy] = Field(description="Per-unit roles and postures for all alive friendlies.")
     call_me_back_if: List[str] = Field(description="Observable re-strategize triggers (concise conditions).")
-
-    @model_validator(mode="after")
-    def _no_placeholder(self) -> "StrategyOutput":
-        """
-        Guard against placeholder tool-call arguments like 'arguments_final_result'.
-        """
-        placeholders = {"arguments_final_result", "argument_final_result", "placeholder"}
-        if any(
-            getattr(self, field).strip().lower() in placeholders
-            for field in ["analysis", "strategy"]
-        ):
-            raise ValueError("Placeholder content is not allowed in strategy output.")
-        return self
 
     def to_text(self, include_analysis: bool = True, include_callbacks: bool = True) -> str:
         """

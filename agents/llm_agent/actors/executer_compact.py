@@ -1,7 +1,7 @@
 from typing import List, Literal, Union, Optional, Dict, Annotated
 
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.models.openrouter import OpenRouterModelSettings
 
@@ -60,13 +60,6 @@ class TeamTurnPlan(BaseModel):
     entity_actions: List[EntityAction] = Field(
         description="Ordered list of actions for each controllable unit, with reasoning"
     )
-
-    @model_validator(mode="after")
-    def _no_placeholder(self) -> "TeamTurnPlan":
-        placeholders = {"arguments_final_result", "argument_final_result", "placeholder"}
-        if self.analysis.strip().lower() in placeholders:
-            raise ValueError("Placeholder content is not allowed in executor output.")
-        return self
 
 
 def _format_strategy(deps: GameDeps) -> str:

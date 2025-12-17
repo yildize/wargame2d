@@ -172,7 +172,8 @@ class LLMCompactAgent(BaseAgent):
         """
         try:
             result: AgentRunResult[AnalystCompactOutput] = analyst_compact_agent.run_sync(
-                user_prompt="Provide the analyst view for this turn.", deps=self.game_deps
+                user_prompt="Provide the analyst view for this turn. Return a proper tool call; never use placeholder arguments.",
+                deps=self.game_deps,
             )
             if store:
                 self._store_analyst_output(result.output)
@@ -224,7 +225,8 @@ class LLMCompactAgent(BaseAgent):
         """
         try:
             result: AgentRunResult[TeamTurnPlan] = executer_compact_agent.run_sync(
-                user_prompt="Propose the actions for this turn.", deps=self.game_deps
+                user_prompt="Propose the actions for this turn. Return a proper tool call; never use placeholder arguments.",
+                deps=self.game_deps,
             )
             mapped = self._map_team_plan_to_actions(result.output, allowed_actions)
             return {"actions": mapped, "plan": result.output, "error": None}
@@ -250,7 +252,8 @@ class LLMCompactAgent(BaseAgent):
         if not is_replan:
             return (
                 "Analyse the game state carefully and come up with winning strategy for the team.\n"
-                f"{current_state}"
+                "Return a tool call to 'final_result' with concrete fields; do not use placeholders like 'arguments_final_result'.\n"
+                f"{current_state}\n"
             )
 
         last_strategy_turn = deps.strategy_set_turn
@@ -294,6 +297,9 @@ class LLMCompactAgent(BaseAgent):
             "\n"
             "# CURRENT STATE\n"
             f"{current_state}\n"
+            "\n"
+            "# RESPONSE FORMAT\n"
+            "Return a tool call to 'final_result' with concrete fields; never use placeholder arguments like 'arguments_final_result'.\n"
         )
 
     def _summarize_key_facts_since_last_strategy(self) -> str:
