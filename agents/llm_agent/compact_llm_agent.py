@@ -242,13 +242,22 @@ class LLMCompactAgent(BaseAgent):
             if candidate.type == ActionType.WAIT:
                 return candidate
             if candidate.type == ActionType.MOVE and hasattr(llm_action, "direction"):
-                if llm_action.direction == getattr(candidate, "direction", None):
+                dir_param = candidate.params.get("dir")
+                desired = llm_action.direction
+                if isinstance(desired, str):
+                    try:
+                        desired_dir = MoveDir[desired]
+                    except KeyError:
+                        desired_dir = None
+                else:
+                    desired_dir = desired
+                if desired_dir and dir_param == desired_dir:
                     return candidate
             if candidate.type == ActionType.SHOOT and hasattr(llm_action, "target_id"):
-                if llm_action.target_id == getattr(candidate, "target_id", None):
+                if llm_action.target_id == candidate.params.get("target_id"):
                     return candidate
             if candidate.type == ActionType.TOGGLE and hasattr(llm_action, "on"):
-                if bool(llm_action.on) == getattr(candidate, "on", None):
+                if bool(llm_action.on) == candidate.params.get("on"):
                     return candidate
         return None
 
