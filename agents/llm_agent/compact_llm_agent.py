@@ -43,9 +43,6 @@ class LLMCompactAgent(BaseAgent):
         self._recorded_kill_ids: Set[int] = set()
         self.game_deps = GameDeps()
         self.game_deps.team_name = self.team.name
-        # Share live references so prompts can access the latest info without per-call copies.
-        self._step_logs: Dict[int, Dict[str, Any]] = {}
-        self.game_deps.visible_history = self._step_logs
 
     def get_actions(
         self,
@@ -63,7 +60,7 @@ class LLMCompactAgent(BaseAgent):
         self._update_casualties(step_info, world, intel)
         visible_step_log = self._distill_step_info(step_info, intel, world)
         if visible_step_log is not None:
-            self._step_logs[world.turn - 1] = visible_step_log
+            self.game_deps.visible_history[world.turn - 1] = visible_step_log
 
         for entity in intel.friendlies:
             if not entity.alive:
@@ -127,7 +124,7 @@ class LLMCompactAgent(BaseAgent):
             "compact_state_text": state_text,
             "note": "State-only pass; actions are safe fallbacks.",
             "visible_step_log": visible_step_log,
-            "visible_history": self._step_logs,
+            "visible_history": self.game_deps.visible_history,
             "strategy_plan": strategy_plan,
             "strategy_error": strategy_error,
             "analyst_notes": analyst_output.model_dump() if analyst_output else None,

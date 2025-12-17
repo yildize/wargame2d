@@ -165,8 +165,8 @@ analyst_compact_agent = Agent[GameDeps, AnalystCompactOutput](
 
 @analyst_compact_agent.instructions
 def full_prompt(ctx: RunContext[GameDeps]) -> str:
-    deps = ctx.deps or GameDeps()
-    team_label = deps.team_name or "your team"
+    deps = ctx.deps
+    team_label = deps.team_name
 
     strategy_text = (
         deps.strategy_plan.to_text(include_analysis=True)
@@ -177,7 +177,7 @@ def full_prompt(ctx: RunContext[GameDeps]) -> str:
     key_facts = _format_key_facts(history)
     step_logs = _format_step_logs(
         getattr(deps, "visible_history", {}),
-        getattr(deps, "max_history_turns", 5),
+        getattr(deps, "max_history_turns", 3),
         getattr(deps, "current_turn_number", 0),
         getattr(deps, "team_name", None),
     )

@@ -21,7 +21,7 @@ class GameDeps:
 
     analyst_history: Dict[int, "AnalystCompactOutput"] = field(default_factory=dict)
     visible_history: Dict[int, Dict[str, Any]] = field(default_factory=dict)
-    max_history_turns: int = 5
+    max_history_turns: int = 3
 
     # multi_phase_strategy: Optional[str] = None
     # current_phase_strategy: Optional[str] = None
