@@ -565,7 +565,7 @@ class LLMCompactAgent(BaseAgent):
                     "type": attacker_ent.kind.name if attacker_ent and hasattr(attacker_ent, "kind") else None,
                 }
             else:
-                attacker_info = {"id": None, "team": None, "type": "UNKNOWN"}
+                attacker_info = {"id": result.attacker_id, "team": None, "type": "UNKNOWN"}
 
             target_info: Dict[str, Any] = {}
             if target_friend or target_visible_enemy:
@@ -576,7 +576,7 @@ class LLMCompactAgent(BaseAgent):
                     "type": target_ent.kind.name if target_ent and hasattr(target_ent, "kind") else None,
                 }
             else:
-                target_info = {"id": None, "team": None, "type": "UNKNOWN"}
+                target_info = {"id": result.target_id, "team": None, "type": "UNKNOWN"}
 
             combat_entries.append(
                 {

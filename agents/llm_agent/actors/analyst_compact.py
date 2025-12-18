@@ -98,7 +98,7 @@ def _describe_combat(entry: Dict[str, Any]) -> str:
     def _label(unit: Dict[str, Any]) -> str:
         uid = unit.get("id")
         uteam = unit.get("team") or "UNKNOWN"
-        utype = unit.get("type") or "Unit"
+        utype = unit.get("type") or "UNKNOWN"
         return f"{utype}#{uid}({uteam})" if uid is not None else f"{utype}({uteam})"
 
     line = f"{_label(attacker)}"
@@ -124,9 +124,9 @@ def _format_step_logs(history: dict[int, dict], max_turns: int, current_turn: in
     for turn in turns:
         delta = current_turn - turn
         if delta == 1:
-            header = f"Last turn (T{turn}):"
+            header = f"Last turn (Turn {turn}):"
         elif delta > 1:
-            header = f"{delta} turns ago (T{turn}):"
+            header = f"{delta} turns ago (Turn {turn}):"
         else:
             header = f"Turn {turn}:"
         turn_log = history[turn] or {}
@@ -146,18 +146,18 @@ def _format_step_logs(history: dict[int, dict], max_turns: int, current_turn: in
             else:
                 enemy_lines.append(_describe_combat(combat))
 
-        lines.append(f"- {header}")
-        lines.append("  OUR ACTIONS")
+        lines.append(f"{header}")
+        lines.append("OUR ACTIONS")
         if our_lines:
-            lines.extend([f"    - {l}" for l in our_lines])
+            lines.extend([f"- {l}" for l in our_lines])
         else:
-            lines.append("    - None observed.")
+            lines.append("- None observed.")
 
-        lines.append("  ENEMY ACTIONS (Observed)")
+        lines.append("ENEMY ACTIONS (Observed)")
         if enemy_lines:
-            lines.extend([f"    - {l}" for l in enemy_lines])
+            lines.extend([f"- {l}" for l in enemy_lines])
         else:
-            lines.append("    - None observed.")
+            lines.append("- None observed.")
 
     return "\n".join(lines)
 
@@ -166,10 +166,10 @@ analyst_compact_agent = Agent[GameDeps, AnalystCompactOutput](
     "openrouter:deepseek/deepseek-v3.1-terminus:exacto",
     deps_type=GameDeps,
     output_type=AnalystCompactOutput,
-    # model_settings=OpenRouterModelSettings(
-    #     max_tokens=1024 * 24,
-    #     openrouter_reasoning={"effort": "low"},
-    # ),
+    model_settings=OpenRouterModelSettings(
+        max_tokens=1024 * 24,
+        openrouter_reasoning={"effort": "low"},
+    ),
     output_retries=3,
 )
 
