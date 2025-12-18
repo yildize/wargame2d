@@ -193,11 +193,8 @@ def full_prompt(ctx: RunContext[GameDeps]) -> str:
         getattr(deps, "team_name", None),
     )
     prev_turns = [t for t in history.keys() if t < getattr(deps, "current_turn_number", 0)]
-    if prev_turns:
-        last_turn = max(prev_turns)
-        previous_analysis = f"Turn {last_turn}:\n{history[last_turn].analysis}"
-    else:
-        previous_analysis = "None yet."
+    prev_turn = max(prev_turns) if prev_turns else None
+    previous_analysis = history[prev_turn].analysis if prev_turn is not None else "None yet."
     current_state = deps.current_state or "No current state available."
 
     return f"""
@@ -228,7 +225,7 @@ You are the analyst supporting the strategist  and field executer for {team_labe
 ## Last {getattr(deps, "max_history_turns", 5)} Turns Observable Step Logs
 {step_logs}
 
-## Previous Turn Analysis
+## Previous Turn Analysis{f\" (Turn {prev_turn})\" if prev_turn is not None else ''}
 {previous_analysis}
 
 ---
