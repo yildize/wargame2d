@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from env.environment import StepInfo
 
 
-@register_agent("llm_agent")
+@register_agent("llm_basic")
 class LLMAgent(BaseAgent):
     """
     Lightweight agent focused on producing a concise, human-readable state view.
